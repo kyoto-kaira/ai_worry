@@ -5,6 +5,7 @@ import torch
 from PIL import Image
 from transformers import Owlv2ForObjectDetection, Owlv2Processor
 from pathlib import Path
+import numpy as np
 
 model_name = "google/owlv2-base-patch16-ensemble"
 processor = Owlv2Processor.from_pretrained(model_name)
@@ -42,7 +43,7 @@ with torch.no_grad():
 target_sizes = torch.tensor([target_image.size[::-1]]).to(device)
 # 画像クエリはテキストより特徴が具体的なため、thresholdは0.5〜0.7程度に高めに設定可能
 results = processor.post_process_image_guided_detection(
-    outputs=outputs, target_sizes=target_sizes, threshold=0.99
+    outputs=outputs, target_sizes=target_sizes, threshold=0.85
 )
 
 boxes = results[0]["boxes"]

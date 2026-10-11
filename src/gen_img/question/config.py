@@ -1,4 +1,5 @@
 from gen_img.paths import FAKE_DIR as FAKE
+from gen_img.paths import OCCLUDER_DIR
 from gen_img.paths import REAL_DIR as REAL
 from gen_img.question.placement import BackgroundStyle, Placement as P
 
@@ -14,6 +15,10 @@ HALO_RADIUS = 3
 # 遮蔽物の領域が画像全体のこの割合を超えたら、輪郭の隙間から漏れたとみなす
 OCCLUDER_MAX_AREA = 0.06
 
+# 物陰から見えている部分のうち、本体から離れた小さなかけら（枝のすき間から見えるしっぽの切れ端など）は隠す。
+# 見えている一番大きいかたまりに対して、この割合より小さいかたまりを消す
+MIN_FRAGMENT_RATIO = 0.25
+
 BACKGROUND_STYLES = {
     1: BackgroundStyle(stroke_width=2.75, blur=0.6),
     2: BackgroundStyle(stroke_width=1.85, blur=0.3),
@@ -21,6 +26,14 @@ BACKGROUND_STYLES = {
     4: BackgroundStyle(stroke_width=2.15, blur=0.4),
     5: BackgroundStyle(stroke_width=1.8, blur=0.3),
 }
+
+# 茂み・サンゴなど輪郭の閉じていない物の手前マスク（SAM で切り抜いたもの）
+LEFT_BUSH = OCCLUDER_DIR / "sam_bg4_left_bush.png"
+MID_BUSH = OCCLUDER_DIR / "sam_bg4_mid_bush.png"
+LEFT_CORAL = OCCLUDER_DIR / "sam_bg3_left_coral.png"
+CORAL_CLUMP = OCCLUDER_DIR / "sam_bg3_coral_clump.png"
+# ロボット（背景5）：輪郭にすき間があるので、大まかな多角形を線に吸着させて作ったマスク
+ROBOT = OCCLUDER_DIR / "poly_bg5_robot.png"
 
 # 各問題の先頭が本物、残りはすべて偽物
 QUESTIONS = {

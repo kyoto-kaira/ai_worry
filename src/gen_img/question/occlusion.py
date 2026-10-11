@@ -1,4 +1,5 @@
 import numpy as np
+from PIL import Image
 from scipy import ndimage as ndi
 
 from gen_img.question.character import disk
@@ -30,3 +31,18 @@ def occluder_mask(background: np.ndarray, points) -> np.ndarray:
             raise ValueError(f"occluder at {(x, y)} leaks into a huge region")
         mask |= region
     return ndi.binary_dilation(mask, structure=disk(3))
+
+
+def load_front_mask(path) -> np.ndarray:
+    return np.asarray(Image.open(path).convert("L")) > 127
+
+
+def hidden_region(background: np.ndarray, placement) -> np.ndarray:
+    """キャラより手前にある範囲（画像全体の大きさ）"""
+    hidden = np.zeros(background.shape, bool)
+    if placement.behind:
+        hidden |= occluder_mask(background, placement.behind)
+    if placement.front_mask:
+        hidden |= load_front_mask(placement.front_mask)
+    return hidden
+

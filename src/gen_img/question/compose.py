@@ -5,7 +5,7 @@ from scipy import ndimage as ndi
 from gen_img.paths import BACKGROUND_DIR, FAKE_DIR, REAL_DIR
 from gen_img.question.character import load_gray, render_character
 from gen_img.question.config import (
-    BACKGROUND_COUNT,
+    NUM_QUESTIONS_PER_BACKGROUND,
     BACKGROUND_STYLES,
     DISTANT_STROKE_SCALE,
     DISTANT_WIDTH,
@@ -17,7 +17,7 @@ from gen_img.question.placement import Placement
 
 
 def background_id(question_id: int) -> int:
-    return (question_id - 1) % BACKGROUND_COUNT + 1
+    return 1 + (question_id - 1) // NUM_QUESTIONS_PER_BACKGROUND
 
 
 def _check_single_real(placements: list[Placement]):

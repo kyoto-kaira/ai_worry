@@ -57,6 +57,8 @@ uv sync
 
 ## 使い方
 
+背景を足して問題画像を作るまでの詳しい手順（手作業・GPU サーバーでの作業を含む）は [WORKFLOW.md](WORKFLOW.md) を参照。
+
 ```sh
 # 背景を生成（.env に GEMINI_API_KEY を書いておく）
 uv run --env-file .env python -m gen_img.background.main 3 4 5   # 既存は --force で上書き

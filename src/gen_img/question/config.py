@@ -2,7 +2,7 @@ from gen_img.paths import FAKE_DIR as FAKE
 from gen_img.paths import REAL_DIR as REAL
 from gen_img.question.placement import BackgroundStyle, Placement as P
 
-BACKGROUND_COUNT = 5
+BACKGROUND_COUNT = 10
 
 # この幅より小さいキャラは遠くにいるとみなし、線を細くする
 DISTANT_WIDTH = 100
@@ -20,6 +20,11 @@ BACKGROUND_STYLES = {
     3: BackgroundStyle(stroke_width=2.3, blur=0.4),
     4: BackgroundStyle(stroke_width=2.15, blur=0.4),
     5: BackgroundStyle(stroke_width=1.8, blur=0.3),
+    6: BackgroundStyle(stroke_width=1.8, blur=0.3),
+    7: BackgroundStyle(stroke_width=1.85, blur=0.3),
+    8: BackgroundStyle(stroke_width=2.3, blur=0.4),
+    9: BackgroundStyle(stroke_width=2.15, blur=0.4),
+    10: BackgroundStyle(stroke_width=1.8, blur=0.3),
 }
 
 # 各問題の先頭が本物、残りはすべて偽物

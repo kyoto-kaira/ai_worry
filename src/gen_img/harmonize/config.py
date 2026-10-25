@@ -38,3 +38,7 @@ QUESTION_WORK_DIR = WORK_DIR / "questions"
 
 # 問題画像を本番でなじませる設定：PHDiffusion をこの強さでかけ、目・しっぽなど細かい所は元に戻す
 QUESTION_STRENGTH = 0.3
+
+# 隠れたキャラの確認用の切り出し：一辺 = キャラの幅 × この倍率、比較画像の1枚の大きさ
+REVIEW_CROP_SCALE = 2.0
+REVIEW_PANEL_SIZE = 320

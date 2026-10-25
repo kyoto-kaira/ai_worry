@@ -10,13 +10,13 @@ class Placement:
     flip: bool
     x: int
     y: int
-    # キャラを隠す背景の物体の内側の座標
-    behind: tuple[tuple[int, int], ...] = ()
-    # キャラより手前にある範囲を描いたマスク画像（白 = 手前）。茂みなど輪郭が閉じていない物に使う
+    # キャラより手前にある物のマスク画像（白 = 手前。gen_img.mask で作る）。重なった所ではキャラは描かれない
     front_mask: Path | None = None
+    # 隠れている物の名前（確認用の切り出し画像のファイル名に使う）
+    label: str = ""
 
 
 @dataclass(frozen=True)
 class BackgroundStyle:
-    stroke_width: float
+    # キャラの線をぼかす量（背景の線がぼやけているほど大きく）。線の太さと濃さは背景から自動で測って合わせる
     blur: float

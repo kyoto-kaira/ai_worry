@@ -8,11 +8,13 @@ from PIL import Image
 from gen_img.harmonize.config import QUESTION_STRENGTH, QUESTION_WORK_DIR
 from gen_img.harmonize.crops import CropBox, crop_box, harmonize_mask, to_model_input
 from gen_img.harmonize.merge import paste_back, restore_details
-from gen_img.paths import BACKGROUND_DIR, HARMONIZED_QUESTION_DIR
+from gen_img.harmonize.review import save_hidden_crops
+from gen_img.paths import BACKGROUND_DIR, HARMONIZED_QUESTION_DIR, QUESTION_MASK_DIR
 from gen_img.question.character import load_gray
 from gen_img.question.compose import background_id, compose_question, to_rgb_image
 from gen_img.question.config import QUESTIONS
 from gen_img.question.occlusion import hidden_region
+from gen_img.question.tone import background_tone
 
 
 def job_name(question_id: int, index: int) -> str:
@@ -44,7 +46,7 @@ def merge(question_ids):
     """GPU サーバーの出力を書き戻し、問題画像と手前マスクを保存する"""
     boxes = json.loads((QUESTION_WORK_DIR / "boxes.json").read_text())
     outputs = QUESTION_WORK_DIR / "outputs" / f"PHDiffusion_s{QUESTION_STRENGTH}"
-    question_dir, mask_dir = HARMONIZED_QUESTION_DIR / "question", HARMONIZED_QUESTION_DIR / "mask"
+    question_dir, mask_dir = HARMONIZED_QUESTION_DIR / "question", QUESTION_MASK_DIR
     question_dir.mkdir(parents=True, exist_ok=True)
     mask_dir.mkdir(parents=True, exist_ok=True)
     for question_id in question_ids:
@@ -55,12 +57,14 @@ def merge(question_ids):
         for i, (p, alpha) in enumerate(zip(QUESTIONS[question_id], alphas)):
             hidden = hidden_region(background, p)
             result = Image.open(outputs / f"{job_name(question_id, i)}.png")
-            paste_back(canvas, result, harmonize_mask(alpha), hidden, CropBox(**boxes[job_name(question_id, i)]))
+            box = CropBox(**boxes[job_name(question_id, i)])
+            paste_back(canvas, result, harmonize_mask(alpha), hidden, box, background_tone(background_id(question_id)))
             restore_details(canvas, original, alpha)
             front |= hidden
         to_rgb_image(canvas).save(question_dir / f"{question_id}.png")
         # キャラを隠すのに使った手前マスク（白 = キャラより手前）
         Image.fromarray((front * 255).astype(np.uint8)).save(mask_dir / f"{question_id}.png")
+        save_hidden_crops(question_id, QUESTIONS[question_id], alphas, background, original, canvas)
         print(f"question {question_id}")
 
 

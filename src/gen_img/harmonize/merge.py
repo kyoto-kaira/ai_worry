@@ -5,12 +5,19 @@ from scipy import ndimage as ndi
 from gen_img.harmonize.config import DETAIL_DENSITY, DETAIL_SIGMA, MERGE_FEATHER, PROTRUSION_RADIUS
 from gen_img.harmonize.crops import CropBox
 from gen_img.question.character import disk
+from gen_img.question.tone import match_tone, measure_tone
 
 
-def paste_back(canvas: np.ndarray, harmonized: Image.Image, mask: np.ndarray, hidden: np.ndarray, box: CropBox):
+def paste_back(
+    canvas: np.ndarray, harmonized: Image.Image, mask: np.ndarray, hidden: np.ndarray, box: CropBox,
+    tone: tuple[float, float] | None = None,
+):
     """モデルの出力を元の大きさに戻し、調和させた範囲だけを元画像に書き戻す。
-    手前にある物（茂み・サンゴなど）の上は書き戻さず、元の輪郭を残す"""
+    手前にある物（茂み・サンゴなど）の上は書き戻さず、元の輪郭を残す。
+    tone（背景の線の芯の黒さ, 白さ）を渡すと、モデルの出力の濃さをそれに合わせる（モデルを通すと白が少し灰色になるため）"""
     patch = np.asarray(harmonized.convert("L").resize((box.size, box.size), Image.LANCZOS)).astype(np.float32)
+    if tone is not None:
+        patch = match_tone(patch, measure_tone(patch, box.cut(mask)), tone)
     weight = ndi.gaussian_filter(box.cut(mask & ~hidden).astype(np.float32), MERGE_FEATHER) * ~box.cut(hidden)
     area = box.cut(canvas)
     area[:] = area * (1 - weight) + patch * weight

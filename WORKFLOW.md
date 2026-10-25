@@ -7,13 +7,28 @@
 | 段階 | やること | 手作業 | GPU | 出力 |
 |---|---|---|---|---|
 | 1. 背景 | テーマを書く → Gemini で生成 → 確認 → 線の太さを測る | テーマ・確認・設定 | 不要（API） | `img/background/<番号>.png` |
-| 2. 手前マスク | 隠れ場所を決める → 枠・点を書く → SAM で切り抜く → 候補を選ぶ | 座標・候補選び | 必要 | `img/harmonized_question/mask/<名前>.png` |
+| 2. 手前マスク | 隠したい物の内側を大まかに黒く塗る（はみ出さない）→ SAM で物体の端まで塗り足す → 確認 | 塗る・確認 | 必要 | `img/harmonized_question/mask/object/normal/<名前>.png` |
 | 3. 問題画像 | 配置を書く → 下見 → PHDiffusion でなじませる → 確認 | 配置・確認 | 必要 | `img/harmonized_question/question/<番号>.png` |
 
 前提：`uv sync` 済み、`.env` に `GEMINI_API_KEY`（背景生成）と `VAST_API_KEY`（Vast.ai を使う場合）を書いておく。
 GPU の作業は「4. GPU サーバーの使い方」を参照。
 
 ---
+
+## 0. キャラ画像（新しい偽物を足すとき）
+
+キャラ画像は白黒＋透明の PNG（線は黒、体の中は白、外側としっぽの網目の間は透明）。
+しっぽは黒い線だけが体の一部で、網目の間は背景が見える。
+
+新しい偽物を足すときは、白い背景に黒い線で描いた画像を `img/kaira_kun/fake/` に置き、変換する（JPEG も PNG に置き換わる）。
+
+```sh
+uv run python -m gen_img.kaira_kun.main
+```
+
+- しっぽの網目の間は「体の右側にあり、小さな丸（しっぽの先の丸）ではない、線に囲まれた所」として自動で見分ける（基準は `src/gen_img/kaira_kun/config.py`）
+- 見分けを間違えていないか、背景に重ねて確かめる（しっぽの先の丸が透明になっていないか、飾りが透明になっていないか）
+- すでに変換した画像をもう一度変換しても変わらない
 
 ## 1. 背景画像の生成
 
@@ -51,41 +66,47 @@ uv run --env-file .env python -m gen_img.background.main 6 --force  # 作り直�
 - 白黒の線画になっている（灰色の塗り・文字が入っていない）
 - 画面いっぱいに物が描き込まれている
 
-### 1-4. 線の太さを測って登録する（必須）
+### 1-4. ぼかしの量を登録する（必須）
 
-キャラの線の太さを背景に合わせるのに使う。
-
-```sh
-uv run python -c "from gen_img.question.character import line_width, load_gray; print(round(line_width(load_gray('img/background/6.png')), 2))"
-```
-
-出た値を `src/gen_img/question/config.py` の `BACKGROUND_STYLES` に入れる。**登録しないと問題画像を作るときに `KeyError` で止まる。**
+キャラの線の太さ・黒さ・白さは、問題を作るときに背景から自動で測って合わせる。登録が必要なのは、キャラの線をぼかす量だけ。
+`src/gen_img/question/config.py` の `BACKGROUND_STYLES` に足す。**登録しないと問題画像を作るときに `KeyError` で止まる。**
 
 ```python
 BACKGROUND_STYLES = {
     ...
-    6: BackgroundStyle(stroke_width=2.1, blur=0.4),
+    6: BackgroundStyle(blur=0.4),
 }
 ```
 
-- `blur`：キャラの線をぼかす量。背景の線がぼやけているほど大きく（今までの背景では 0.3〜0.6）
-- 背景 b は問題 `4(b-1)+1` 〜 `4b` に使われる（背景6なら問題21〜24。`NUM_QUESTIONS_PER_BACKGROUND = 4`）
+- `blur`：背景の線がぼやけているほど大きく（今までの背景では 0.3〜0.6）
+- 自動で測った値は次で確かめられる（線の太さ、線の芯の黒さ・白さ）
+
+```sh
+uv run python -c "from gen_img.question.tone import background_stroke, background_tone; print(background_stroke(6), background_tone(6))"
+```
+
+- 背景 b は問題 `5(b-1)+1` 〜 `5b` に使われる（背景6なら問題26〜30。`NUM_QUESTIONS_PER_BACKGROUND = 5`）
 
 ---
 
 ## 2. 手前マスクの生成（隠れ場所を作る）
 
 キャラを物の後ろに隠すときの「手前にある物の範囲」（白 = キャラより手前）。
+**物体の範囲そのもの**を塗る。背景の線（輪郭や影の線）で囲まれた領域は、物体の一部の面にすぎないことが多いので使わない。
 
-### 2-0. マスクが要るかを決める
+流れ：
 
-| 隠れ場所 | 方法 | マスク |
-|---|---|---|
-| 箱・キノコの傘・柱など、輪郭が閉じている物 | 配置の `behind` に物の内側の座標を書くだけ（3-1） | 不要 |
-| 茂み・サンゴ・枝分かれした物 | SAM で切り抜く（2-2〜2-4） | 必要 |
-| 形は単純だが輪郭にすき間がある物（ロボットなど） | 大まかな多角形を背景の線に吸着させる（2-5） | 必要（GPU 不要） |
+1. 人が、隠したい物の内側を大まかに黒く塗る。物体からははみ出さない（2-2）
+2. SAM が、塗った範囲をもとに物体の端まで塗り足す（2-3〜2-4）
+3. 問題画像を作るとき、その物の近くにキャラを置くと、重なった所ではキャラが描かれず、物の後ろに隠れる（3-1）
 
-迷ったら `behind` で試し、物の外まで範囲が広がる（`leaks into a huge region` で止まる）なら SAM か多角形にする。
+### 2-0. 作り方を選ぶ
+
+| 隠れ場所 | 方法 |
+|---|---|
+| ほとんどの物（箱・機械・キノコの傘・柱・茂みなど） | 大まかに塗って SAM で合わせる（2-2〜2-4） |
+| 塗るより点で指定した方が早い物、文字で探せる物（サンゴなど） | 枠・点・文字で SAM に指示する（2-5） |
+| SAM がうまく切り抜けない物（輪郭にすき間がある・窓の向こうなど） | 多角形をそのまま使う（2-6、GPU 不要） |
 
 ### 2-1. 座標を調べる
 
@@ -107,33 +128,32 @@ im.save("work/grid_6.png")
 EOF
 ```
 
-### 2-2. 切り抜く物を書く
+### 2-2. 大まかに塗る
 
-`src/gen_img/mask/config.py` の `SAM_TARGETS` に書き足す。名前は `sam_bg<背景番号>_<物>` にしておくと分かりやすい。書き方は3通り。
+背景と同じ大きさの画像に、隠したい物を黒で大まかに塗って `img/harmonized_question/mask/rough/<名前>.png` に置く（それ以外は白か透明）。
+名前は `bg<背景番号>_<物>`（例：`bg6_barrel`）。ペイントソフトで背景の上に別レイヤーで塗り、そのレイヤーだけ書き出すとよい。
+
+**ルール：必ず物体の内側だけを塗る（物体からはみ出さない）。**
+
+- 塗った所は、SAM の結果にかかわらず必ず物体として扱う。はみ出すと、その分がそのまま手前マスクになり、キャラが何もない所で欠ける
+- 物体の端まで塗る必要はない。足りない所は SAM が塗り足す。ただし塗り足すのは塗った所から `fill`（20px）以内だけなので、物体の縁から 20px 以内まで塗っておく
+- 形に沿って丁寧に塗る必要はない。物体の内側に収まっていれば、雑でよい
+- 1枚に塗るのは1つの物体だけ。隣の物まで塗らない
+
+塗ったら `src/gen_img/mask/config.py` の `ROUGH_TARGETS` に足す：
 
 ```python
-# (a) 文字で探す：形がはっきりした物（サンゴなど）。search_box の中から "coral" を探して切り抜く
-SamTarget("sam_bg6_coral", 6, (0, 230, 210, 450), object_text="coral"),
-
-# (b) 枠と内側の点：文字では別の物を拾ってしまう物（茂みなど）
-SamTarget("sam_bg6_bush", 6, (88, 576, 298, 660),
-          points=[(132, 584), (168, 598), (258, 612)]),
-
-# (c) (b) に「物ではない所」の点を足す：近くの樽・キノコなどまで拾ってしまうとき
-SamTarget("sam_bg6_bush2", 6, (380, 570, 500, 692),
-          points=[(400, 600), (470, 588), (478, 650)],
-          neg_points=[(447, 615), (512, 610)]),
+RoughTarget("bg6_barrel", 6),
+# 物体の縁から遠い所までしか塗れないとき（細かい物の中など）は、塗り足す範囲を広げる（px）
+RoughTarget("bg6_barrel", 6, fill=30),
 ```
 
-- `search_box`：(左, 上, 右, 下)。(a) では探す範囲、(b)(c) では物を囲む枠
-- 内側の点は、線の上ではなく物の中の白い所に置く。物全体に散らばるように 5〜7 個
-- 物ではない点は、間違えて拾われた物（2-4 で分かる）の上に置く
-- `candidate` は 2-4 で決める（最初は 0 のままでよい）
+- `fill`：塗った所からこの距離以内で、SAM が物体とみなした所を塗り足す。広げると隣の物まで拾いやすくなる
 
 ### 2-3. GPU で切り抜く
 
 ```sh
-uv run python -m gen_img.mask.main prepare    # work/mask/ に背景と targets.json を用意（前回の結果は消える）
+uv run python -m gen_img.mask.main prepare bg6_barrel   # work/mask/ に背景と SAM への指示を用意（名前を省略すると全部。前回の結果は消える）
 ```
 
 `work/mask/` と `src/gen_img/mask/segment_remote.py` を GPU サーバーに送り、次を実行して `masks/` を持ち帰って `work/mask/masks/` に置く。
@@ -143,39 +163,61 @@ pip install -q "transformers==4.48.3" accelerate   # 新しい transformers だ�
 python segment_remote.py <work/mask を置いた場所>
 ```
 
+- 塗った範囲からは、`fill` だけ広げた外枠と、範囲全体に散らした内側の点 8 個（背景の線の上は避ける）が自動で作られ、SAM に渡される
 - 使うモデル：Grounding DINO（`IDEA-Research/grounding-dino-base`）と SAM（`facebook/sam-vit-huge`）。初回は自動でダウンロード
 - RTX 3090 で、読み込み 40 秒、1か所あたり 0.5〜1.9 秒、GPU メモリ最大 6.5GB。Colab 無料枠（T4）でも足りる
 - 「custom kernel を読み込めない」という警告は無視してよい（遅い処理に切り替わるだけ）
 
-### 2-4. 候補を選んで保存する
-
-SAM は1か所につき3つの候補（`<名前>_0〜2.png`）を返す。背景に赤く重ねて見比べる。
+### 2-4. 保存して確認する
 
 ```sh
-uv run python - <<'EOF'
+uv run python -m gen_img.mask.main finish bg6_barrel   # img/harmonized_question/mask/object/normal/ に保存（hard=True の物は object/hard/）
+```
+
+SAM は1か所につき3つの候補を返す（物体の一部 / 物体 / 物体＋くっついている物 など）。塗った範囲から作るときは、候補ごとに
+
+- 塗った範囲をどれだけ含むか（一部しかない候補は低い）
+- 候補のうち、塗った範囲から `fill` より外にはみ出した割合（隣の物まで拾った候補は高い）
+
+から点数（前者 − 2 × 後者）を出し、一番点数の高い候補を使う。そのうち塗った範囲から `fill` 以内の所だけを残し、
+「一番大きいかたまりだけ残す・小さな穴を埋める」処理をしてから保存する。
+
+- 塗りのうち SAM が物体の外と判断した所は外す（隣の物にかかった塗りを抑えるため）。外した量が塗りの 10% を超えると `warning: ... 塗った範囲の XX% を SAM が物体の外と判断して外した` と表示されるので、塗りがはみ出していないか確かめる
+- マスクに囲まれた穴のうち、塗った所にかかる穴は物体の一部として埋める。塗っていない穴（窓のガラスなど）は残す
+- どの候補も点数が 0.5 未満のときは、SAM が物体を切り抜けなかったとみなし、塗った範囲をそのまま使う（`warning: ... SAM が物体を切り抜けなかった`）
+- 窓の向こうに隠すときのように、物体が「ガラス以外の壁と枠」といった SAM の苦手な形のときは、`fill=0` にして塗り足さない
+- SAM の塗り足しがどうしてもうまく補えない物（暗い洞窟のように手前の物の境目がはっきりしないなど）は、`RoughTarget(..., hard=True)` にする。
+  マスクは `object/hard/` に作られて記録として残るが、問題画像には使えない（配置に使うとエラーで止まる）
+
+できたマスクを背景に赤く重ね、物体の形に合っているか確かめる。合っていなければ、塗り直すか `fill` を変えて 2-3 からやり直す。
+
+```sh
+uv run python - <<'PY'
 import numpy as np
 from PIL import Image
-name, bg = "sam_bg6_bush", 6
+name, bg = "bg6_barrel", 6
 base = np.asarray(Image.open(f"img/background/{bg}.png").convert("RGB")).astype(float)
-for k in range(3):
-    m = np.asarray(Image.open(f"work/mask/masks/{name}_{k}.png")) > 127
-    over = base.copy()
-    over[m] = over[m] * 0.5 + np.array([255, 0, 0]) * 0.5
-    Image.fromarray(over.astype(np.uint8)).save(f"work/check_{name}_{k}.png")
-EOF
+m = np.asarray(Image.open(f"img/harmonized_question/mask/object/normal/{name}.png")) > 127
+base[m] = base[m] * 0.5 + np.array([255, 0, 0]) * 0.5
+Image.fromarray(base.astype(np.uint8)).save(f"work/check_{name}.png")
+PY
 ```
 
-- 物の形に沿っていて、ほかの物まで塗られていない候補を選び、`config.py` の `candidate` に番号を書く
-- どれもだめなら、点を足す・物ではない点を足す（2-2 の (c)）などして 2-3 からやり直す
-- 決まったら保存する：
+### 2-5. 枠・点・文字で SAM に指示する
 
-```sh
-uv run python -m gen_img.mask.main finish     # 選んだ候補を整えて img/harmonized_question/mask/ に保存
+塗る代わりに、`SAM_TARGETS` に枠と点（または検索語）を書く。手順は 2-3〜2-4 と同じで、3つの候補から使うものを `candidate` で選ぶ（`work/mask/masks/<名前>_0〜2.png` を見比べる）。
+
+```python
+# 文字で探す：形がはっきりした物（サンゴなど）。search_box の中から "coral" を探して切り抜く
+SamTarget("sam_bg6_coral", 6, (0, 230, 210, 450), object_text="coral"),
+# 枠と内側の点。近くの物まで拾うときは、物ではない所の点（neg_points）も足す
+SamTarget("sam_bg6_bush", 6, (380, 570, 500, 692),
+          points=[(400, 600), (470, 588), (478, 650)], neg_points=[(447, 615)], candidate=1),
 ```
 
-保存時に「一番大きいかたまりだけ残す・小さな穴を埋める」処理が入る（離れた所の小さなかたまりがキャラの顔に乗って目が隠れるのを防ぐため）。
+座標は、背景に方眼を重ねた画像（2-1）を見て決める。
 
-### 2-5. 多角形から作る（GPU 不要）
+### 2-6. 多角形から作る（GPU 不要）
 
 `LASSO_TARGETS` に物を囲む多角形の頂点を書き、実行する。多角形の縁にかかる背景の線は自動で含まれる。
 
@@ -196,35 +238,37 @@ uv run python -m gen_img.mask.main lasso
 `src/gen_img/question/config.py` の `QUESTIONS` に、問題ごとのキャラを並べる。**先頭が本物（`REAL`）、残りが偽物（`FAKE`）。** 本物が1体でない問題は生成時にエラーになる。
 
 ```python
-21: [
-    P(REAL / "1.png", 120, 0, False, 125, 519, front_mask=OCCLUDER_DIR / "sam_bg6_bush.png"),  # 茂みの中
-    P(FAKE / "12.png", 130, 0, True, 640, 650, behind=((655, 690),)),  # 王冠、箱の後ろ
-    P(FAKE / "1.jpg", 140, 8, False, 20, 470),  # 3つ目、隠れていない
+26: [
+    P(REAL / "1.png", 120, 0, False, 125, 519, front_mask=occluder("bg6_bush"), label="bush"),  # 茂みの中
+    P(FAKE / "12.png", 130, 0, True, 640, 650, front_mask=occluder("bg6_barrel"), label="barrel"),  # 王冠、樽の後ろ
+    P(FAKE / "1.png", 140, 8, False, 20, 470),  # 3つ目、隠れていない
     ...
 ],
 ```
 
-`P(画像, 幅, 角度, 左右反転, x, y, behind=..., front_mask=...)`
+`P(画像, 幅, 角度, 左右反転, x, y, front_mask=..., label=...)`
 
 - `幅`：キャラの横幅（px）。高さは幅の約 0.65 倍。100 未満だと遠くにいるとみなして線を細くする
 - `x, y`：キャラの左上の座標
-- `behind`：輪郭の閉じた物の内側の座標（複数可）。その物の後ろに隠れる
-- `front_mask`：2 で作ったマスク。その範囲の後ろに隠れる
-- 物陰に隠すときは、頭と目が出る高さにする。目安は「マスクの上端 − 幅 × 0.45」を `y` にする
+- `front_mask`：2 で作ったマスク（`occluder("名前")` で指定）。マスクと重なった所ではキャラは描かれず、その物の後ろに隠れる
+- `label`：隠れている物の名前。3-5 の切り出し画像のファイル名に使う
+- 物陰に隠すときは、頭と目が出る高さにする。目安は「マスクの上端 − 幅 × 0.38」を `y` にする
+- 頭が 50% 未満、または目が 90% 未満しか見えていない配置は、問題を作るときにエラーで止まる（`MIN_VISIBLE_HEAD`・`MIN_VISIBLE_EYES`）
+- 物の横から顔を出すときは、目のある側が物の外に出るよう `左右反転` を使う（反転なしだと目は左側）
 - 1問に 5〜7 体。キャラ同士が重ならないようにする
 
 偽物を選ぶときの注意（答えが1つに決まるように）：
 
-- 小さいキャラ（幅 100 未満）や隠れているキャラには、目の数の違い（`1.jpg` 3つ目、`2.jpg` 1つ目）や王冠・双葉・ポニーテールのような分かりやすいものを使う
+- 小さいキャラ（幅 100 未満）や隠れているキャラには、目の数の違い（`1.png` 3つ目、`2.png` 1つ目）や王冠・双葉・ポニーテールのような分かりやすいものを使う
 - 舌（`7.png`）・寄り目（`9.png`）・触手なし（`3.png`）は、小さいと・隠れると・背景が細かいと見分けられない
-- アホ毛（`6.png`）は毛が細く、幅 135px でもほとんど見えなかった
+- アホ毛（`6.png`）は以前は毛が1本で小さく見えなかったため、大きな巻き毛3本に描き直した（幅 80px でも見える）
 
 ### 3-2. 下見する（GPU 不要）
 
 なじませる前の合成を作って確認する。ここで配置を詰めてから GPU に進む。
 
 ```sh
-uv run python -c "from gen_img.question.compose import build_question; build_question(21).save('work/preview_21.png')"
+uv run python -c "from gen_img.question.compose import build_question; build_question(26).save('work/preview_26.png')"
 ```
 
 ※ `python -m gen_img.question.main` は使わない（旧版の `img/question/` を上書きしてしまう）。
@@ -232,14 +276,14 @@ uv run python -c "from gen_img.question.compose import build_question; build_que
 ### 3-3. なじませる
 
 ```sh
-uv run python -m gen_img.harmonize.questions prepare 21 22 23 24   # キャラごとの切り出しを work/harmonize/questions/jobs に作る
+uv run python -m gen_img.harmonize.questions prepare 26 27 28 29 30   # キャラごとの切り出しを work/harmonize/questions/jobs に作る
 ```
 
 `work/harmonize/questions/jobs/` と `src/gen_img/harmonize/remote_infer.py` を GPU サーバーに送り、PHDiffusion を準備して実行する（下の手順）。
 `outputs/PHDiffusion_s0.3/` を持ち帰って `work/harmonize/questions/outputs/` に置き、書き戻す。
 
 ```sh
-uv run python -m gen_img.harmonize.questions merge 21 22 23 24     # img/harmonized_question/ に保存
+uv run python -m gen_img.harmonize.questions merge 26 27 28 29 30     # img/harmonized_question/ に保存
 ```
 
 GPU サーバーでの準備と実行（`/workspace/kaira` に jobs と remote_infer.py を置いた場合）：
@@ -274,7 +318,7 @@ python remote_infer.py /workspace/kaira --strengths 0.3   # 強さは QUESTION_S
 uv run python - <<'EOF'
 from PIL import Image
 from gen_img.question.config import QUESTIONS
-q = 21
+q = 26
 im = Image.open(f"img/harmonized_question/question/{q}.png")
 tiles = []
 for p in QUESTIONS[q]:
@@ -296,7 +340,8 @@ EOF
 ### 3-5. 出力
 
 - `img/harmonized_question/question/<番号>.png`：問題画像
-- `img/harmonized_question/mask/<番号>.png`：その問題でキャラを隠すのに使った手前マスク
+- `img/harmonized_question/mask/question/<番号>.png`：その問題でキャラを隠すのに使った手前マスク（物ごとのマスクをまとめたもの）
+- `img/harmonized_question/crop/<番号>_<何体目>_<real|fake>_<label>.png`：物陰に隠れたキャラごとに「なじませる前・後・人が塗った範囲（青。手前マスクの縁を赤い線で重ねる）・手前マスク（赤）」を並べたもの。隠れ方の違和感を調べるのに使う（git には入れない）。塗りから作っていないマスクは塗りの欄が `rough: none`
 
 ---
 

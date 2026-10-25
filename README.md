@@ -7,19 +7,26 @@
 ```
 img/
   background/   Kaira君がいない背景
-  kaira_kun/
+  kaira_kun/    白黒＋透明の PNG（線は黒、体の中は白、外側としっぽの網目の間は透明）
     real/       本物（正解）
     fake/       偽物
   question/     問題画像（旧版・10枚。AI でなじませる前のもの）
   harmonized_question/
-    question/   問題画像 20 枚（背景 + 本物1体 + 偽物、AI でなじませたもの）
-    mask/       手前マスク（白 = キャラより手前）。<番号>.png は問題ごと、それ以外は茂み・サンゴなど物ごと（gen_img.mask で作る）
+    question/   問題画像 25 枚（背景 + 本物1体 + 偽物、AI でなじませたもの）
+    crop/       物陰に隠れたキャラの比較（なじませる前・後・塗った範囲・手前マスク。git に入れない）
+    mask/
+      rough/    人が隠したい物の内側を大まかに黒く塗った画像（物体からはみ出さない。物ごとのマスクの元）
+      object/   物ごとの手前マスク（茂み・サンゴ・建物など。gen_img.mask で作る。白 = キャラより手前）
+        normal/ 問題画像に使う物
+        hard/   マスクの自動作成（SAM による塗り足し）がうまく補えない物。記録として残し、問題画像には使わない
+      question/ 問題ごとの手前マスク（その問題でキャラを隠すのに使った物をまとめたもの）
 exp/            実験の記録（中身は exp/README.md）、実験用のコードは exp/code/
 src/gen_img/
   paths.py      画像フォルダのパス
   background/   背景の生成（Gemini API）
     config.py   モデル・プロンプト・テーマ
     generate.py
+  kaira_kun/    キャラ画像を白黒＋透明に変換する（しっぽの網目の間を自動で見分けて透明にする）
   question/     問題画像の合成
     config.py   背景ごとの線の太さ、問題ごとの配置
     placement.py
@@ -76,8 +83,7 @@ uv run python -m gen_img.harmonize.questions prepare        # キャラごとの
 uv run python -m gen_img.harmonize.questions merge          # img/harmonized_question/ に書き出す
 ```
 
-問題 n は背景 `1 + (n-1) // NUM_QUESTIONS_PER_BACKGROUND` を使います（今は背景1枚につき4問、問題1〜4が背景1）。
+問題 n は背景 `1 + (n-1) // NUM_QUESTIONS_PER_BACKGROUND` を使います（今は背景1枚につき5問、問題1〜5が背景1）。
 配置は `src/gen_img/question/config.py` の `QUESTIONS` で、各問題の先頭が本物、残りが偽物です。
 
-- `behind`：背景の物体の内側の座標を指定すると、その物体の後ろに隠れます（輪郭が閉じている物向け）
-- `front_mask`：手前マスクの画像を指定すると、その範囲の後ろに隠れます（茂み・サンゴなど）
+- `front_mask`：手前マスク（`img/harmonized_question/mask/object/normal/`）を指定すると、その物の後ろに隠れます。マスクは隠したい物を大まかに塗った画像（`mask/rough/`）から SAM で作ります（WORKFLOW.md の 2 章）

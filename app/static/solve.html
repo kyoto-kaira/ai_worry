@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaira君を探せ</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #222; --sub: #666; --line: #ddd;
+    --accent: #2b6cb0; --ok: #2f855a; --ng: #c53030; --hint: #d69e2e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  select, button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .badge { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #edf2f7; color: var(--sub); }
+  .badge.yolo { background: #e6fffa; color: #234e52; }
+  nav a { color: var(--accent); text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+  nav a.here { background: #ebf4ff; font-weight: bold; }
+  .stats { margin-left: auto; display: flex; gap: 14px; font-variant-numeric: tabular-nums; }
+  main { display: grid; grid-template-columns: 1fr 260px; gap: 12px; padding: 12px 16px; height: calc(100vh - 58px); }
+  #stage { position: relative; overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; }
+  #stage canvas { position: absolute; left: 0; top: 0; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 14px; }
+  aside h2 { font-size: 14px; margin: 14px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  #target { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  #log { list-style: none; padding: 0; margin: 0; }
+  #log li { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .ok { color: var(--ok); } .ng { color: var(--ng); }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 8px 14px; border-radius: 6px; color: #fff; font-weight: bold; display: none; pointer-events: none; }
+  #result { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(255,255,255,.35); pointer-events: none; }
+  #result div { background: #fff; border: 2px solid var(--ok); border-radius: 10px; padding: 16px 22px; text-align: center; pointer-events: auto; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+  .help { color: var(--sub); font-size: 12px; line-height: 1.6; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; height: auto; } #stage { height: 70vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kaira君を探せ</h1>
+  <nav><a href="/" class="here">解く</a><a href="/create">作る</a></nav>
+  <select id="question"></select>
+  <select id="level"></select>
+  <button id="hint">ヒント（YOLO）</button>
+  <button id="giveup">答えを見る</button>
+  <button id="next" class="primary">次の問題</button>
+  <span id="yolo" class="badge"></span>
+  <div class="stats"><span>時間 <b id="time">0.0</b>秒</span><span>おてつき <b id="miss">0</b></span><span>ヒント <b id="hints">0</b></span></div>
+</header>
+<main>
+  <div id="stage"><canvas id="view"></canvas><div id="toast"></div><div id="result"><div id="resultBody"></div></div></div>
+  <aside>
+    <h2>さがすのはこの子（本物）</h2>
+    <img id="target" alt="本物の Kaira君">
+    <p class="help">
+      本物は1体だけ。ほかは王冠・リボン・目の数などが少し違う偽物です。★の問題は、ほかの人が作った問題です。<br>
+      クリックで答える／ホイールで拡大／ドラッグで移動
+    </p>
+    <h2>ヒント</h2>
+    <p class="help" id="hintHelp"></p>
+    <h2>記録</h2>
+    <ul id="log"></ul>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const stage = $("stage"), canvas = $("view"), ctx = canvas.getContext("2d");
+let info, q, img = new Image();
+let view = { scale: 1, x: 0, y: 0 };
+let state;
+
+function resetState() {
+  state = { start: performance.now(), end: null, miss: 0, hints: 0, marks: [], hintCircles: [], solved: false, revealed: false };
+}
+
+async function init() {
+  info = await (await fetch("/api/info")).json();
+  for (const { id, title } of info.questions) $("question").add(new Option(title, id));
+  for (const [key, lv] of Object.entries(info.levels)) $("level").add(new Option(lv.label, key));
+  $("level").value = "normal";
+  labelQuestions();
+  const y = info.yolo;
+  $("yolo").textContent = y.mode === "yolo" ? "ヒント: YOLO" : "ヒント: モック";
+  $("yolo").title = y.mode === "yolo" ? "data/best.pt で検出" : `正解の位置から作ったモック（${y.reason}）`;
+  $("yolo").classList.toggle("yolo", y.mode === "yolo");
+  $("question").onchange = () => load($("question").value);
+  $("level").onchange = () => { labelQuestions(); load(q.id); };
+  $("next").onclick = () => {
+    const ids = info.questions.map((x) => x.id), i = ids.indexOf(q.id);
+    $("question").value = ids[(i + 1) % ids.length];
+    load($("question").value);
+  };
+  $("hint").onclick = showHint;
+  $("giveup").onclick = () => { state.revealed = true; state.end ??= performance.now(); draw(); };
+  // ?q=u3 のように問題を指定して開ける（作った問題を登録した後など）
+  const asked = new URLSearchParams(location.search).get("q");
+  const first = info.questions.some((x) => x.id === asked) ? asked : info.questions[0].id;
+  $("question").value = first;
+  load(first);
+  setInterval(tick, 100);
+}
+
+// 今の難易度のヒント（YOLO の上位）に本物が入らない問題には印を付ける
+function labelQuestions() {
+  const top = info.levels[$("level").value].top;
+  [...$("question").options].forEach((o, i) => {
+    const { title, real_rank: rank } = info.questions[i];
+    o.textContent = title + (top && (rank === null || rank > top) ? "（AIも苦戦）" : "");
+  });
+}
+
+async function load(id) {
+  q = await (await fetch(`/api/questions/${id}`)).json();
+  resetState();
+  $("result").style.display = "none";
+  $("target").src = `/chara/real/${q.characters[0].image}`;
+  const lv = info.levels[$("level").value];
+  const rank = info.questions.find((x) => x.id === q.id).real_rank;
+  $("hint").disabled = !lv.top;
+  $("hintHelp").textContent = lv.top
+    ? `YOLO が「本物らしい」と推定した場所を、自信の高い順に上位 ${lv.top} か所まで丸で示します。押すたびに丸が小さくなります。`
+      + (rank === null || rank > lv.top ? " この問題では、YOLO の上位に本物が入っていません（AIも苦戦する問題）。" : "")
+    : "この難易度ではヒントは使えません。";
+  img = new Image();
+  img.onload = () => { fit(); draw(); };
+  img.src = `/img/${id}.png`;
+}
+
+function fit() {
+  canvas.width = stage.clientWidth; canvas.height = stage.clientHeight;
+  view.scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+  view.x = (canvas.width - img.width * view.scale) / 2;
+  view.y = (canvas.height - img.height * view.scale) / 2;
+}
+
+function tick() {
+  if (!state) return;
+  const end = state.end ?? performance.now();
+  $("time").textContent = ((end - state.start) / 1000).toFixed(1);
+  $("miss").textContent = state.miss;
+  $("hints").textContent = state.hints;
+}
+
+// ヒント：YOLO の推定（本物らしさの確信度が高い順）の上位いくつかを、少しずらした丸で示す。
+// 上位に本物が入っていなければ、丸の中に本物はいない（AI のヒントなので外れることもある）。押すたびに丸を小さくする
+function showHint() {
+  if (state.solved || state.revealed) return;
+  const lv = info.levels[$("level").value];
+  if (state.hints === 0) {
+    const top = q.detections.filter((d) => !d.fake).slice(0, lv.top);
+    if (!top.length) {
+      toast("YOLO はこの問題で候補を1つも出せなかった…", "var(--hint)");
+      return;
+    }
+    state.hintCircles = top.map(({ box: [x0, y0, x1, y1] }) => {
+      const r = Math.max(x1 - x0, y1 - y0) * lv.hint_radius;
+      return { cx: (x0 + x1) / 2 + (Math.random() - 0.5) * r * 0.5, cy: (y0 + y1) / 2 + (Math.random() - 0.5) * r * 0.5, r };
+    });
+    toast(`YOLO の上位 ${top.length} 候補（自信 ${percent(top[0].conf)}〜${percent(top.at(-1).conf)}）`, "var(--hint)");
+  } else {
+    for (const c of state.hintCircles) c.r = Math.max(c.r * 0.75, 30);
+  }
+  state.hints += 1;
+  draw();
+}
+
+// 確信度の表示。低い値も 0% にならないよう、10% 未満は小数1桁まで出す
+const percent = (conf) => (conf < 0.1 ? (conf * 100).toFixed(1) : Math.round(conf * 100)) + "%";
+
+function toast(text, color) {
+  const t = $("toast");
+  t.textContent = text; t.style.background = color; t.style.display = "block";
+  clearTimeout(t.timer); t.timer = setTimeout(() => (t.style.display = "none"), 1600);
+}
+
+function log(text, cls) {
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="${cls}">${text}</span>`;
+  $("log").prepend(li);
+}
+
+function answer(px, py) {
+  if (state.solved || state.revealed) return;
+  const pad = 6;
+  const hit = q.characters.findIndex(({ box: [x0, y0, x1, y1] }) => px >= x0 - pad && px <= x1 + pad && py >= y0 - pad && py <= y1 + pad);
+  if (hit === 0) {
+    state.solved = true; state.end = performance.now();
+    const sec = ((state.end - state.start) / 1000).toFixed(1);
+    $("resultBody").innerHTML = `<h3 class="ok">みつけた！</h3><p>${sec} 秒・おてつき ${state.miss} 回・ヒント ${state.hints} 回</p>`;
+    $("result").style.display = "flex";
+    log(`${info.questions.find((x) => x.id === q.id).title}（${info.levels[$("level").value].label}）: ${sec} 秒`, "ok");
+  } else if (hit > 0) {
+    state.miss += 1;
+    state.marks.push({ x: px, y: py, kind: "fake", box: q.characters[hit].box });
+    toast(`偽物！（${q.characters[hit].feature ?? "よく見ると違う"}）`, "var(--ng)");
+  } else {
+    state.miss += 1;
+    state.marks.push({ x: px, y: py, kind: "none" });
+    toast("ここにはいない", "#555");
+  }
+  draw();
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+  ctx.drawImage(img, 0, 0);
+  const lw = 2 / view.scale;
+  ctx.lineWidth = lw * 1.5;
+  for (const c of state.hintCircles) {
+    ctx.strokeStyle = "rgba(214,158,46,.9)"; ctx.setLineDash([8 / view.scale, 6 / view.scale]);
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (const m of state.marks) {
+    ctx.strokeStyle = m.kind === "fake" ? "#c53030" : "#555";
+    const s = 10 / view.scale;
+    ctx.beginPath(); ctx.moveTo(m.x - s, m.y - s); ctx.lineTo(m.x + s, m.y + s); ctx.moveTo(m.x + s, m.y - s); ctx.lineTo(m.x - s, m.y + s); ctx.stroke();
+  }
+  if (state.solved || state.revealed) {
+    ctx.font = `${14 / view.scale}px sans-serif`;
+    q.characters.forEach((c, i) => {
+      const [x0, y0, x1, y1] = c.box;
+      ctx.strokeStyle = i === 0 ? "#2f855a" : "#dd6b20"; ctx.lineWidth = (i === 0 ? 4 : 2) / view.scale;
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fillText(i === 0 ? "本物" : c.feature, x0, y0 - 4 / view.scale);
+    });
+    // YOLO の推定の上位（青い点線と確信度。一番多くヒントに出す数まで）
+    ctx.strokeStyle = "#3182ce"; ctx.fillStyle = "#3182ce"; ctx.lineWidth = lw; ctx.setLineDash([4 / view.scale, 4 / view.scale]);
+    const maxTop = Math.max(...Object.values(info.levels).map((lv) => lv.top));
+    for (const d of q.detections.filter((d) => !d.fake).slice(0, maxTop)) {
+      const [x0, y0, x1, y1] = d.box;
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.fillText(percent(d.conf), x0, y1 + 14 / view.scale);
+    }
+    ctx.setLineDash([]);
+  }
+}
+
+// 拡大・移動・クリック
+let drag = null;
+stage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const k = Math.exp(-e.deltaY * 0.0015), rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  view.x = mx - (mx - view.x) * k; view.y = my - (my - view.y) * k; view.scale *= k;
+  draw();
+}, { passive: false });
+stage.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; stage.setPointerCapture(e.pointerId); });
+stage.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+  if (drag.moved) { view.x = drag.vx + dx; view.y = drag.vy + dy; draw(); }
+});
+stage.addEventListener("pointerup", (e) => {
+  if (drag && !drag.moved) {
+    const rect = canvas.getBoundingClientRect();
+    answer((e.clientX - rect.left - view.x) / view.scale, (e.clientY - rect.top - view.y) / view.scale);
+  }
+  drag = null;
+});
+window.addEventListener("resize", () => { if (img.complete) { fit(); draw(); } });
+
+init();
+</script>
+</body>
+</html>

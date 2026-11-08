@@ -1,10 +1,11 @@
 import numpy as np
 from PIL import Image
 from scipy import ndimage as ndi
-from skimage.morphology import skeletonize
+from skimage.morphology import remove_small_objects, skeletonize
 
 from gen_img.kaira_kun.transparent import on_white
-from gen_img.question.config import HALO_RADIUS, LINE_HALO_RADIUS, STROKE_GROW_RANGE, STROKE_MIN_LENGTH_RATIO, STROKE_SEARCH_STEPS, STROKE_SUPERSAMPLE
+from gen_img.paths import REAL_DIR
+from gen_img.question.config import FEATURE_MIN_AREA, FEATURE_TOLERANCE, HALO_RADIUS, LINE_HALO_RADIUS, STROKE_GROW_RANGE, STROKE_MIN_LENGTH_RATIO, STROKE_SEARCH_STEPS, STROKE_SUPERSAMPLE
 from gen_img.question.placement import Placement
 from gen_img.question.tone import core_width, match_tone, measure_tone
 
@@ -42,10 +43,27 @@ def head_and_eyes(body: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return head, head & ~white
 
 
-def _trimmed(gray: np.ndarray, body: np.ndarray, pad: int = 4) -> tuple[np.ndarray, np.ndarray]:
+def features(path) -> np.ndarray:
+    """偽物を見分ける特徴（本物の絵に描き足した線。王冠・リボン・触角など）。
+    本物と大きさの違う絵（描き直した偽物）や本物は、特徴を線で取り出せないので空にする（目の違いは目の確認で見る）"""
+    lines = on_white(Image.open(path)) < 128
+    if path.parent == REAL_DIR:
+        return np.zeros_like(lines)
+    extras = []
+    for real in sorted(REAL_DIR.glob("*.png")):
+        real_lines = on_white(Image.open(real)) < 128
+        if real_lines.shape == lines.shape:
+            extras.append(lines & ~ndi.binary_dilation(real_lines, structure=disk(FEATURE_TOLERANCE)))
+    if not extras:
+        return np.zeros_like(lines)
+    # 一番近い本物との差。線の揺れによる細かい差は除く
+    return remove_small_objects(min(extras, key=np.sum), max_size=FEATURE_MIN_AREA)
+
+
+def _trimmed(gray: np.ndarray, *masks: np.ndarray, pad: int = 4) -> tuple[np.ndarray, ...]:
     ys, xs = np.where(gray < 128)
     box = (slice(ys.min(), ys.max() + 1), slice(xs.min(), xs.max() + 1))
-    return np.pad(gray[box], pad, constant_values=255), np.pad(body[box], pad)
+    return np.pad(gray[box], pad, constant_values=255), *(np.pad(m[box], pad) for m in masks)
 
 
 def _line_distance(gray: np.ndarray, size: tuple[int, int]) -> np.ndarray:
@@ -88,23 +106,26 @@ def _fit_stroke(gray: np.ndarray, size, stroke_width: float, blur: float, tone) 
 def render_character(
     p: Placement, stroke_width: float, blur: float, tone: tuple[float, float] = (0.0, 255.0)
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """配置どおりに拡縮・回転した（線画, 後ろの背景を白で消す範囲 0〜1, 頭の範囲, 目の範囲）を返す。
+    """配置どおりに拡縮・回転した（線画, 後ろの背景を白で消す範囲 0〜1, 頭の範囲, 目の範囲, 偽物の特徴の範囲）を返す。
     tone は背景の（線の芯の黒さ, 白さ）で、キャラの濃さをそれに合わせる"""
-    gray, body = _trimmed(*load_character(p.image))
+    gray, body, feature = _trimmed(*load_character(p.image), features(p.image))
     size = (p.width, max(1, round(gray.shape[0] * p.width / gray.shape[1])))
     # 線の太さと濃さを背景に合わせて描く（ぼかすと線の芯が灰色になるので、濃さも合わせ直す）
     lines = _fit_stroke(gray, size, stroke_width, blur, tone)
 
     image = Image.fromarray(lines.clip(0, 255).astype(np.uint8))
     mask = Image.fromarray((body * 255).astype(np.uint8)).resize(size, Image.LANCZOS)
-    head, eyes = (
-        Image.fromarray((region * 255).astype(np.uint8)).resize(size, Image.LANCZOS) for region in head_and_eyes(body)
+    head, eyes, feature = (
+        Image.fromarray((region * 255).astype(np.uint8)).resize(size, Image.LANCZOS)
+        for region in (*head_and_eyes(body), feature)
     )
     if p.flip:
-        image, mask, head, eyes = (im.transpose(Image.FLIP_LEFT_RIGHT) for im in (image, mask, head, eyes))
+        image, mask, head, eyes, feature = (im.transpose(Image.FLIP_LEFT_RIGHT) for im in (image, mask, head, eyes, feature))
     if p.angle:
         image = image.rotate(p.angle, Image.BICUBIC, expand=True, fillcolor=255)
-        mask, head, eyes = (im.rotate(p.angle, Image.BICUBIC, expand=True, fillcolor=0) for im in (mask, head, eyes))
+        mask, head, eyes, feature = (
+            im.rotate(p.angle, Image.BICUBIC, expand=True, fillcolor=0) for im in (mask, head, eyes, feature)
+        )
 
     image = np.asarray(image).astype(np.float32)
     # 体の中は周りに白い縁を付けて背景を消す。線だけの所（しっぽ・触角など）は縁を細くし、網目の間は背景を見せる
@@ -113,4 +134,6 @@ def render_character(
         ndi.grey_dilation(np.asarray(mask), footprint=disk(HALO_RADIUS)),
         ndi.grey_dilation(lines, footprint=disk(LINE_HALO_RADIUS)),
     )
-    return image, mask.astype(np.float32) / 255, np.asarray(head) > 127, np.asarray(eyes) > 127
+    return (
+        image, mask.astype(np.float32) / 255, np.asarray(head) > 127, np.asarray(eyes) > 127, np.asarray(feature) > 63
+    )

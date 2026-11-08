@@ -32,6 +32,11 @@ MIN_FRAGMENT_RATIO = 0.25
 MIN_VISIBLE_HEAD = 0.5
 # 目はこの割合以上見えていないといけない（片目が隠れると1つ目の偽物と見分けがつかなくなる）
 MIN_VISIBLE_EYES = 0.9
+# 偽物の特徴（本物の絵に描き足した王冠・リボンなど）はこの割合以上見えていないといけない（隠れると本物と見分けられない）。
+# 特徴は、本物の線をこの半径（px、元の絵の大きさで）だけ太らせた範囲の外にある線のうち、この面積より大きいかたまり
+MIN_VISIBLE_FEATURE = 0.8
+FEATURE_TOLERANCE = 4
+FEATURE_MIN_AREA = 40
 
 BACKGROUND_STYLES = {
     1: BackgroundStyle(blur=0.6),
@@ -264,4 +269,54 @@ QUESTIONS = {
         P(FAKE / "2.png", 115, -6, True, 600, 860),  # 1つ目
         P(FAKE / "13.png", 110, -4, False, 230, 150),  # 双葉
     ],
+}
+
+
+def occluders(*names: str) -> tuple:
+    """隙間に隠すときの、両側の物の手前マスク"""
+    return tuple(occluder(name) for name in names)
+
+
+# 2つの物の隙間からのぞく問題（img/harmonized_question/hidden/）。問題番号: (背景番号, 配置)。各問題の先頭が本物。
+# 本物だけが隙間にいると目立つので、偽物も別の隙間に入れる。
+# しっぽの無い偽物（fake/3）は、しっぽの隠れた本物と見分けられないので使わない
+GAP_QUESTIONS: dict[int, tuple[int, list[P]]] = {
+    # 背景 5：上の床の椅子2脚の間と、右の椅子とロボットの間
+    1: (5, [
+        P(REAL / "1.png", 75, 0, True, 134, 170, front_mask=occluders("bg5_chair_left", "bg5_chair_right"), label="chairs"),
+        P(FAKE / "1.png", 80, 0, True, 215, 149, front_mask=occluders("bg5_chair_right", "bg5_upper_robot"), label="chair_robot"),  # 3つ目
+        P(FAKE / "10.png", 115, 4, True, 30, 640),  # ツノ
+        P(FAKE / "11.png", 115, 0, False, 840, 330),  # 触角
+        P(FAKE / "5.png", 120, 6, True, 330, 880),  # ポニーテール
+    ]),
+    2: (5, [
+        P(REAL / "1.png", 70, 0, True, 204, 155, front_mask=occluders("bg5_chair_right", "bg5_upper_robot"), label="chair_robot"),
+        P(FAKE / "12.png", 75, 0, True, 134, 160, front_mask=occluders("bg5_chair_left", "bg5_chair_right"), label="chairs"),  # 王冠
+        P(FAKE / "4.png", 115, 4, False, 860, 860),  # リボン
+        P(FAKE / "2.png", 115, -6, True, 600, 860),  # 1つ目
+        P(FAKE / "8.png", 120, 6, True, 30, 330),  # まつ毛
+    ]),
+    # 背景 3：制御ボックスと右の操作盤の間と、左の水槽と機械の間
+    3: (3, [
+        P(REAL / "1.png", 110, 0, True, 667, 637, front_mask=occluders("bg3_control_box", "bg3_console"), label="control_console"),
+        P(FAKE / "2.png", 110, 0, False, 195, 654, front_mask=occluders("bg3_glass_tank", "bg3_machine"), label="tank_machine"),  # 1つ目
+        P(FAKE / "12.png", 140, 4, False, 860, 200),  # 王冠
+        P(FAKE / "10.png", 135, 6, False, 660, 120),  # ツノ
+        P(FAKE / "13.png", 130, -4, True, 380, 880),  # 双葉
+    ]),
+    4: (3, [
+        P(REAL / "2.png", 120, 0, False, 195, 657, front_mask=occluders("bg3_glass_tank", "bg3_machine"), label="tank_machine"),
+        P(FAKE / "1.png", 110, 0, False, 682, 622, front_mask=occluders("bg3_control_box", "bg3_console"), label="control_console"),  # 3つ目
+        P(FAKE / "11.png", 135, -4, False, 880, 160),  # 触角
+        P(FAKE / "4.png", 130, 0, False, 470, 220),  # リボン
+        P(FAKE / "5.png", 140, 0, False, 40, 10),  # ポニーテール
+    ]),
+    # 背景 4：キノコの軸と柵の柱の間（隙間は1か所だけなので、偽物はキノコの傘の後ろに隠す）
+    5: (4, [
+        P(REAL / "1.png", 120, 0, True, 432, 521, front_mask=occluders("bg4_mid_stem", "bg4_post"), label="stem_post"),
+        P(FAKE / "12.png", 120, 0, False, 401, 339, front_mask=occluder("bg4_small_cap"), label="small_cap"),  # 王冠
+        P(FAKE / "11.png", 130, 0, False, 885, 246, front_mask=occluder("bg4_right_cap"), label="right_cap"),  # 触角
+        P(FAKE / "10.png", 130, -4, False, 40, 585),  # ツノ
+        P(FAKE / "2.png", 140, 4, True, 560, 790),  # 1つ目
+    ]),
 }

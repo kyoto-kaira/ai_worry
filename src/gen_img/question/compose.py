@@ -11,6 +11,7 @@ from gen_img.question.config import (
     DISTANT_WIDTH,
     MIN_FRAGMENT_RATIO,
     MIN_VISIBLE_EYES,
+    MIN_VISIBLE_FEATURE,
     MIN_VISIBLE_HEAD,
     QUESTIONS,
 )
@@ -27,9 +28,9 @@ def _check_single_real(placements: list[Placement]):
     real, *fakes = placements
     if real.image.parent != REAL_DIR or any(p.image.parent != FAKE_DIR for p in fakes):
         raise ValueError("a question must contain exactly one real Kaira-kun, placed first")
-    for p in placements:
-        if p.front_mask is not None and p.front_mask.parent == HARD_OCCLUDER_DIR:
-            raise ValueError(f"{p.front_mask.name} is in mask/object/hard (automatic mask completion does not work well for it) and is not used for questions")
+    for path in (path for p in placements for path in p.front_masks()):
+        if path.parent == HARD_OCCLUDER_DIR:
+            raise ValueError(f"{path.name} is in mask/object/hard (automatic mask completion does not work well for it) and is not used for questions")
 
 
 def _small_fragments(body: np.ndarray, hidden: np.ndarray) -> np.ndarray:
@@ -70,11 +71,14 @@ def _paste(canvas: np.ndarray, background: np.ndarray, p: Placement, image, alph
     return visible_alpha
 
 
-def _check_heads_visible(placements: list[Placement], masks: list[np.ndarray], heads, eyes):
-    """頭と目が十分見えているか（物陰とほかのキャラに隠された分を除いて数える）"""
-    for i, (p, mask, head, eye) in enumerate(zip(placements, masks, heads, eyes)):
-        for name, region, minimum in (("head", head, MIN_VISIBLE_HEAD), ("eyes", eye, MIN_VISIBLE_EYES)):
-            ratio = (region & (mask > 0.5)).sum() / max(1, region.sum())
+def _check_heads_visible(placements: list[Placement], masks: list[np.ndarray], heads, eyes, features):
+    """頭・目・偽物の特徴が十分見えているか（物陰とほかのキャラに隠された分を除いて数える）"""
+    for i, (p, mask, head, eye, feature) in enumerate(zip(placements, masks, heads, eyes, features)):
+        checks = (("head", head, MIN_VISIBLE_HEAD), ("eyes", eye, MIN_VISIBLE_EYES), ("feature", feature, MIN_VISIBLE_FEATURE))
+        for name, region, minimum in checks:
+            if not region.any():
+                continue
+            ratio = (region & (mask > 0.5)).sum() / region.sum()
             if ratio < minimum:
                 kind = "real" if i == 0 else "fake"
                 raise ValueError(
@@ -93,18 +97,19 @@ def compose(bg_id: int, placements: list[Placement]) -> tuple[np.ndarray, list[n
 
     background = load_gray(BACKGROUND_DIR / f"{bg_id}.png")
     canvas = background.copy()
-    masks, heads, eyes = [], [], []
+    masks, heads, eyes, features = [], [], [], []
     for p in placements:
         stroke = background_stroke(bg_id) * (DISTANT_STROKE_SCALE if p.width < DISTANT_WIDTH else 1)
-        image, alpha, head, eye = render_character(p, stroke, style.blur, background_tone(bg_id))
+        image, alpha, head, eye, feature = render_character(p, stroke, style.blur, background_tone(bg_id))
         masks.append(_paste(canvas, background, p, image, alpha))
         heads.append(_on_canvas(head, canvas.shape, p))
         eyes.append(_on_canvas(eye, canvas.shape, p))
+        features.append(_on_canvas(feature, canvas.shape, p))
     # 後から貼ったキャラに隠された部分は、前のキャラのマスクから除く
     for i in range(len(masks)):
         for later in masks[i + 1 :]:
             masks[i] *= 1 - later
-    _check_heads_visible(placements, masks, heads, eyes)
+    _check_heads_visible(placements, masks, heads, eyes, features)
     return np.clip(canvas, 0, 255), masks
 
 

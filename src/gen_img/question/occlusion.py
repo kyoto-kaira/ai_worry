@@ -7,7 +7,8 @@ def load_front_mask(path) -> np.ndarray:
 
 
 def hidden_region(background: np.ndarray, placement) -> np.ndarray:
-    """キャラより手前にある範囲（画像全体の大きさ）"""
-    if placement.front_mask is None:
-        return np.zeros(background.shape, bool)
-    return load_front_mask(placement.front_mask)
+    """キャラより手前にある範囲（画像全体の大きさ。マスクが複数あれば合わせた範囲）"""
+    hidden = np.zeros(background.shape, bool)
+    for path in placement.front_masks():
+        hidden |= load_front_mask(path)
+    return hidden

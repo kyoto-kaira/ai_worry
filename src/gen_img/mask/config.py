@@ -100,4 +100,12 @@ ROUGH_TARGETS = [
     RoughTarget("bg5_window", 5, fill=0),
     RoughTarget("bg5_chair", 5),
     RoughTarget("bg5_alien", 5),
+    # 隙間からのぞく問題用（2つの物の隙間に隠す）
+    RoughTarget("bg3_console", 3),
+    RoughTarget("bg4_mid_stem", 4, fill=30),
+    RoughTarget("bg4_post", 4, fill=25),
+    RoughTarget("bg5_chair_left", 5, fill=30),
+    RoughTarget("bg5_chair_right", 5, fill=30),
+    # 胴体だけ塗る。腕・脚・頭は胴体から最大 50px ほど離れているので広めに塗り足す
+    RoughTarget("bg5_upper_robot", 5, fill=55),
 ]

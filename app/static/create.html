@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaira君を探せ：問題を作る</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #222; --sub: #666; --line: #ddd;
+    --accent: #2b6cb0; --ok: #2f855a; --ng: #c53030; --warn: #d69e2e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  nav a { color: var(--accent); text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+  nav a.here { background: #ebf4ff; font-weight: bold; }
+  .counts { margin-left: auto; font-variant-numeric: tabular-nums; }
+  select, button, input, textarea { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 12px; padding: 12px 16px; height: calc(100vh - 58px); }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 14px; }
+  aside h2 { font-size: 14px; margin: 16px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  details { margin-top: 6px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  textarea { width: 100%; height: 56px; resize: vertical; }
+  input[type=text] { width: 100%; }
+  input[type=range] { flex: 1; }
+  .help { color: var(--sub); font-size: 12px; line-height: 1.6; margin: 4px 0; }
+  .palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .tool { border: 2px solid var(--line); border-radius: 6px; padding: 3px; text-align: center; font-size: 10px; cursor: pointer; background: #fff; line-height: 1.3; }
+  .tool img { width: 100%; height: 36px; object-fit: contain; }
+  .tool.real { border-color: #9ae6b4; }
+  .tool.on { border-color: var(--accent); background: #ebf4ff; box-shadow: 0 0 0 1px var(--accent); }
+  .tool.erase { font-size: 22px; display: flex; flex-direction: column; justify-content: center; }
+  .tool.erase span { font-size: 10px; }
+  #stage { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #stage canvas { position: absolute; left: 0; top: 0; }
+  #toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px; color: #fff; font-weight: bold; display: none; pointer-events: none; z-index: 2; }
+  #status { min-height: 1.4em; }
+  #result { border-radius: 8px; padding: 10px; margin-top: 10px; display: none; line-height: 1.6; }
+  #result.win { background: #f0fff4; border: 1px solid var(--ok); }
+  #result.lose { background: #fffaf0; border: 1px solid var(--warn); }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; height: auto; } #stage { height: 70vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kaira君を探せ</h1>
+  <nav><a href="/">解く</a><a href="/create" class="here">作る</a></nav>
+  <span class="counts">本物 <b id="realCount">0</b>/1 ・ 偽物 <b id="fakeCount">0</b> 体</span>
+</header>
+<main>
+  <aside>
+    <h2>1. 背景</h2>
+    <select id="background" style="width:100%"></select>
+    <details>
+      <summary>Gemini で新しい背景を作る</summary>
+      <p class="help">どんな場面を描きたいか、下の欄に書いてください。できるまで約20秒かかります。物がたくさん描き込まれた場面ほど、難しい問題になります。</p>
+      <textarea id="theme"></textarea>
+      <button id="generate">背景を作る</button>
+    </details>
+
+    <h2>2. Kaira君を置く</h2>
+    <p class="help">
+      下から Kaira君を選び、画像の置きたい所をクリックしてください。カーソルの絵が<b style="color:var(--ok)">緑の枠</b>なら置けます。<b style="color:var(--ng)">赤の枠</b>や赤く塗った所は、ほかの Kaira君と重なるので置けません。
+      本物は1体だけ置いてください（置き直すと前の本物は消えます）。消したいときは右クリックしてください。
+    </p>
+    <div class="palette" id="reals"></div>
+    <div class="palette" id="fakes" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:8px">大きさ <input type="range" id="width"> <b id="widthLabel"></b>px</div>
+    <label class="row" style="margin-top:4px"><input type="checkbox" id="flip"> 左右反転</label>
+    <label class="row" style="margin-top:4px"><input type="checkbox" id="names" checked> 名札を表示（本物・偽物の特徴）</label>
+    <div class="row" style="margin-top:6px"><button id="clear">全部消す</button></div>
+    <p class="help">難しくしたいときは、偽物を増やす・小さくする・本物との違いが小さい偽物を選ぶ、を試してみてください。</p>
+
+    <details>
+      <summary>新しい Kaira君を作る（Gemini）</summary>
+      <p class="help">本物の Kaira君をどう描き変えたいか、下の欄に書いてください。偽物を作るときは、見分けるポイントも書いてください。できるまで約20秒かかります。</p>
+      <div class="row"><label><input type="radio" name="kind" value="fake" checked> 偽物</label><label><input type="radio" name="kind" value="real"> 本物</label></div>
+      <textarea id="kairaPrompt" placeholder="例：頭に小さなシルクハットをのせる"></textarea>
+      <input type="text" id="kairaLabel" placeholder="見分けるポイント（例：シルクハット）" maxlength="12">
+      <div class="row" style="margin-top:6px"><button id="makeKaira">Kaira君を作る</button></div>
+    </details>
+
+    <h2>3. 登録</h2>
+    <input type="text" id="title" placeholder="問題の名前" maxlength="40">
+    <input type="text" id="author" placeholder="作った人の名前" maxlength="20" style="margin-top:6px">
+    <div class="row" style="margin-top:8px"><button id="register" class="primary" disabled>この問題を登録する</button></div>
+    <p class="help" id="status"></p>
+    <div id="result"></div>
+  </aside>
+  <div id="stage"><canvas id="view"></canvas><div id="toast"></div></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const stage = $("stage"), canvas = $("view"), ctx = canvas.getContext("2d");
+let options, bg = { id: null, img: null };
+let tool = null;            // { kind, name, label } か "erase"
+let placements = [];        // { kind, name, label, width, flip, x, y }
+let mouse = null;           // 画像上の座標
+let view = { scale: 1, x: 0, y: 0 };
+const sprites = new Map();  // キャラの絵（背景に合わせて描いたもの）。キーは背景・キャラ・大きさ・反転
+
+async function post(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+function toast(text, color) {
+  const t = $("toast");
+  t.textContent = text; t.style.background = color; t.style.display = "block";
+  clearTimeout(t.timer); t.timer = setTimeout(() => (t.style.display = "none"), 1500);
+}
+
+// サーバーで背景の線の太さ・濃さに合わせて描いてもらった絵（一度描いた絵は覚えておく）
+function sprite(kind, name, width, flip) {
+  const key = `${bg.id}|${kind}|${name}|${width}|${flip}`;
+  if (!sprites.has(key)) {
+    sprites.set(key, post("/api/create/sprite", { background: bg.id, kind, name, width, flip }).then((s) => new Promise((ok) => {
+      const img = new Image();
+      img.onload = () => { s.img = img; ok(s); draw(); };
+      img.src = s.url;
+    })));
+  }
+  return sprites.get(key);
+}
+const loaded = new Map();
+function spriteNow(kind, name, width, flip) {
+  const key = `${bg.id}|${kind}|${name}|${width}|${flip}`;
+  if (!loaded.has(key)) { loaded.set(key, null); sprite(kind, name, width, flip).then((s) => loaded.set(key, s)); }
+  return loaded.get(key);
+}
+
+async function init() {
+  options = await (await fetch("/api/create/options")).json();
+  for (const b of options.backgrounds) $("background").add(new Option(b.label, b.id));
+  $("theme").placeholder = `例：${options.theme_example}`;
+  const [lo, hi] = options.width_range;
+  Object.assign($("width"), { min: lo, max: hi, value: options.default_width });
+  $("widthLabel").textContent = options.default_width;
+  $("width").oninput = () => { $("widthLabel").textContent = $("width").value; draw(); };
+  $("flip").onchange = $("names").onchange = draw;
+  $("background").onchange = () => setBackground($("background").value);
+  $("clear").onclick = () => { placements = []; changed(); };
+  $("generate").onclick = generateBackground;
+  $("makeKaira").onclick = makeKaira;
+  $("register").onclick = register;
+  buildPalette();
+  setBackground(options.backgrounds[0].id);
+  window.addEventListener("resize", () => { fit(); draw(); });
+}
+
+function buildPalette(select) {
+  $("reals").innerHTML = ""; $("fakes").innerHTML = "";
+  const add = (box, kind, c) => {
+    const div = document.createElement("div");
+    div.className = `tool ${kind}`;
+    div.innerHTML = `<img src="/chara/${kind}/${c.name}"><div>${c.label}${c.made ? "＊" : ""}</div>`;
+    div.title = kind === "real" ? c.label : `偽物：${c.label}`;
+    div.onclick = () => selectTool({ kind, name: c.name, label: kind === "real" ? "本物" : c.label }, div);
+    box.append(div);
+    if (select && select.kind === kind && select.name === c.name) div.click();
+  };
+  for (const c of options.characters.real) add($("reals"), "real", c);
+  for (const c of options.characters.fake) add($("fakes"), "fake", c);
+  const erase = document.createElement("div");
+  erase.className = "tool erase"; erase.innerHTML = "⌫<span>消しゴム</span>";
+  erase.onclick = () => selectTool("erase", erase);
+  $("fakes").append(erase);
+  if (!select) $("reals").firstChild.click();
+}
+
+function selectTool(t, div) {
+  tool = t;
+  for (const d of document.querySelectorAll(".tool")) d.classList.toggle("on", d === div);
+  stage.style.cursor = t === "erase" ? "not-allowed" : "crosshair";
+  draw();
+}
+
+function setBackground(id) {
+  bg = { id, img: new Image() };
+  $("background").value = id;
+  bg.img.onload = () => {
+    // 背景が変わると大きさが変わることがあるので、はみ出したキャラは外す
+    placements = placements.filter((p) => p.x >= 0 && p.y >= 0 && p.x + 20 < bg.img.width && p.y + 20 < bg.img.height);
+    fit(); changed();
+  };
+  bg.img.src = `/background/${id}.png`;
+}
+
+function fit() {
+  if (!bg.img?.width) return;
+  canvas.width = stage.clientWidth; canvas.height = stage.clientHeight;
+  view.scale = Math.min(canvas.width / bg.img.width, canvas.height / bg.img.height);
+  view.x = (canvas.width - bg.img.width * view.scale) / 2;
+  view.y = (canvas.height - bg.img.height * view.scale) / 2;
+}
+
+// 置いたキャラの範囲（すき間の分だけ広げる）。ここに重なる所には置けない
+function blocked(p, s) {
+  const g = options.gap;
+  return { x0: p.x - g, y0: p.y - g, x1: p.x + s.w + g, y1: p.y + s.h + g };
+}
+
+// カーソルの位置にキャラを置けるか（画像からはみ出さず、ほかのキャラと重ならない）
+function ghostAt() {
+  if (!tool || tool === "erase" || !mouse) return null;
+  const width = +$("width").value, flip = $("flip").checked;
+  const s = spriteNow(tool.kind, tool.name, width, flip);
+  if (!s) return null;
+  const x = Math.round(mouse.x - s.w / 2), y = Math.round(mouse.y - s.h / 2), g = options.gap;
+  const inside = x >= g && y >= g && x + s.w <= bg.img.width - g && y + s.h <= bg.img.height - g;
+  const others = placements.filter((p) => !(tool.kind === "real" && p.kind === "real"));
+  const hit = others.some((p) => {
+    const ps = spriteNow(p.kind, p.name, p.width, p.flip);
+    if (!ps) return false;
+    const b = blocked(p, ps);
+    return x < b.x1 && x + s.w > b.x0 && y < b.y1 && y + s.h > b.y0;
+  });
+  return { ...tool, width, flip, x, y, s, ok: inside && !hit };
+}
+
+function placedAt(px, py) {
+  for (let i = placements.length - 1; i >= 0; i--) {
+    const p = placements[i], s = spriteNow(p.kind, p.name, p.width, p.flip);
+    if (s && px >= p.x && px <= p.x + s.w && py >= p.y && py <= p.y + s.h) return i;
+  }
+  return -1;
+}
+
+function draw() {
+  if (!bg.img?.width) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+  ctx.drawImage(bg.img, 0, 0);
+  const lw = 2 / view.scale;
+  const ghost = ghostAt();
+  // 置けない所を赤く塗る（キャラを選んでいるときだけ）
+  if (tool && tool !== "erase") {
+    ctx.fillStyle = "rgba(229,62,62,.18)";
+    for (const p of placements) {
+      if (tool.kind === "real" && p.kind === "real") continue;
+      const s = spriteNow(p.kind, p.name, p.width, p.flip);
+      if (s) { const b = blocked(p, s); ctx.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0); }
+    }
+  }
+  ctx.font = `bold ${13 / view.scale}px sans-serif`;
+  for (const p of placements) {
+    const s = spriteNow(p.kind, p.name, p.width, p.flip);
+    if (!s) continue;
+    ctx.drawImage(s.img, p.x, p.y);
+    if ($("names").checked) {
+      ctx.fillStyle = p.kind === "real" ? "#2f855a" : "#c05621";
+      ctx.fillText(p.label, p.x, p.y - 3 / view.scale);
+    }
+  }
+  if (ghost) {
+    ctx.globalAlpha = 0.6; ctx.drawImage(ghost.s.img, ghost.x, ghost.y); ctx.globalAlpha = 1;
+    ctx.strokeStyle = ghost.ok ? "#2f855a" : "#e53e3e"; ctx.lineWidth = lw * 1.5;
+    ctx.strokeRect(ghost.x, ghost.y, ghost.s.w, ghost.s.h);
+  }
+  if (tool === "erase" && mouse) {
+    const i = placedAt(mouse.x, mouse.y);
+    if (i >= 0) {
+      const p = placements[i], s = spriteNow(p.kind, p.name, p.width, p.flip);
+      ctx.strokeStyle = "#e53e3e"; ctx.lineWidth = lw * 1.5; ctx.strokeRect(p.x, p.y, s.w, s.h);
+    }
+  }
+}
+
+function toImage(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left - view.x) / view.scale, y: (e.clientY - r.top - view.y) / view.scale };
+}
+canvas.addEventListener("mousemove", (e) => { mouse = toImage(e); draw(); });
+canvas.addEventListener("mouseleave", () => { mouse = null; draw(); });
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const m = toImage(e), i = placedAt(m.x, m.y);
+  if (i >= 0) { placements.splice(i, 1); changed(); }
+});
+canvas.addEventListener("click", async (e) => {
+  mouse = toImage(e);
+  if (tool === "erase") {
+    const i = placedAt(mouse.x, mouse.y);
+    if (i >= 0) { placements.splice(i, 1); changed(); }
+    return;
+  }
+  if (!tool) return;
+  let g = ghostAt();
+  if (!g) {
+    // キャラの絵をまだ描いている途中なら、描き終わるのを待ってから置く
+    const width = +$("width").value, flip = $("flip").checked;
+    const s = await sprite(tool.kind, tool.name, width, flip);
+    loaded.set(`${bg.id}|${tool.kind}|${tool.name}|${width}|${flip}`, s);
+    g = ghostAt();
+    if (!g) return;
+  }
+  if (!g.ok) { toast("ほかのキャラと重なる（または画像からはみ出す）ので置けません", "#c53030"); return; }
+  if (g.kind === "real" && placements.some((p) => p.kind === "real")) {
+    placements = placements.filter((p) => p.kind !== "real");
+    toast("本物を置き直しました", "#2b6cb0");
+  }
+  placements.push({ kind: g.kind, name: g.name, label: g.label, width: g.width, flip: g.flip, x: g.x, y: g.y });
+  changed();
+});
+
+function changed() {
+  const reals = placements.filter((p) => p.kind === "real").length, fakes = placements.length - reals;
+  $("realCount").textContent = reals; $("fakeCount").textContent = fakes;
+  $("register").disabled = !(reals === 1 && fakes >= 1);
+  $("status").textContent = reals === 1 && fakes >= 1 ? "" : "本物を1体と、偽物を1体以上置いてください。置くと登録できます。";
+  $("result").style.display = "none";
+  draw();
+}
+
+async function generateBackground() {
+  const theme = $("theme").value.trim() || options.theme_example;
+  $("generate").disabled = true;
+  $("status").textContent = "Gemini で背景を作っています…（約20秒）";
+  try {
+    const b = await post("/api/create/background", { theme });
+    options.backgrounds.push(b);
+    $("background").add(new Option(b.label, b.id));
+    setBackground(b.id);
+    $("status").textContent = "背景ができました。Kaira君を置いてください。";
+  } catch (e) {
+    $("status").textContent = `背景を作れませんでした：${e.message}`;
+  }
+  $("generate").disabled = false;
+}
+
+async function makeKaira() {
+  const prompt = $("kairaPrompt").value.trim();
+  if (!prompt) { $("status").textContent = "どう描き変えたいかを書いてください。"; return; }
+  const kind = document.querySelector("input[name=kind]:checked").value;
+  $("makeKaira").disabled = true;
+  $("status").textContent = "Gemini で Kaira君を描き変えています…（約20秒）";
+  try {
+    const made = await post("/api/create/kaira", { kind, prompt, label: $("kairaLabel").value.trim() });
+    options = { ...options, ...(await (await fetch("/api/create/options")).json()) };
+    buildPalette(made);
+    $("status").textContent = `できた Kaira君をパレットに追加しました（＊が付いた絵）。${kind === "real" ? "描き変えた本物は、YOLO が見つけにくいことがあります。" : ""}`;
+  } catch (e) {
+    $("status").textContent = `Kaira君を作れませんでした：${e.message}`;
+  }
+  $("makeKaira").disabled = false;
+}
+
+async function register() {
+  $("register").disabled = true;
+  $("status").textContent = "登録して、YOLO に解かせています…";
+  try {
+    const r = await post("/api/create/register", {
+      background: bg.id, title: $("title").value, author: $("author").value,
+      placements: placements.map(({ kind, name, width, flip, x, y }) => ({ kind, name, width, flip, x, y })),
+    });
+    const box = $("result");
+    // YOLO の上位に本物が入らなければ、作った人の勝ち
+    if (r.fooled) {
+      box.className = "win";
+      box.innerHTML = `<b>AI を出し抜きました！</b><br>YOLO の上位 ${r.fool_top} 候補に本物が入りませんでした。`
+        + (r.fooled_by ? `<br>YOLO は偽物（${r.fooled_by}）を一番本物らしいと判断しました。` : "");
+    } else {
+      box.className = "lose";
+      box.innerHTML = r.real_rank === 1
+        ? `<b>YOLO はすぐに本物を見つけました</b>（自信 ${Math.round(r.top_conf * 100)}%）。<br>偽物を増やす・小さくする・背景を細かくすると、AI も迷うかもしれません。`
+        : `<b>YOLO は本物を ${r.real_rank} 番目の候補に挙げました。</b>`
+          + (r.fooled_by ? `<br>一番本物らしいと判断したのは偽物（${r.fooled_by}）でした。` : "");
+    }
+    box.innerHTML += `<br><a href="/?q=${r.id}">この問題を解く →</a>`;
+    box.style.display = "block";
+    $("status").textContent = "登録しました。「解く」画面の問題の一覧に ★ 付きで出ます。";
+  } catch (e) {
+    $("status").textContent = `登録できませんでした：${e.message}`;
+  }
+  $("register").disabled = false;
+}
+
+init();
+</script>
+</body>
+</html>

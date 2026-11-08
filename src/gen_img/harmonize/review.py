@@ -4,8 +4,8 @@ from scipy import ndimage as ndi
 
 from gen_img.harmonize.config import REVIEW_CROP_SCALE, REVIEW_PANEL_SIZE
 from gen_img.harmonize.crops import CropBox
-from gen_img.paths import HIDDEN_CROP_DIR, ROUGH_MASK_DIR
-from gen_img.question.occlusion import load_front_mask
+from gen_img.paths import ROUGH_MASK_DIR
+from gen_img.question.occlusion import hidden_region
 from gen_img.question.placement import Placement
 
 
@@ -21,9 +21,10 @@ def review_box(p: Placement, visible_alpha: np.ndarray) -> CropBox:
 
 
 def _rough(p: Placement) -> np.ndarray | None:
-    """その物の手前マスクの元になった、人が塗った範囲（塗りから作っていない物は None）"""
-    path = ROUGH_MASK_DIR / p.front_mask.name
-    return np.asarray(Image.open(path).convert("L")) < 128 if path.exists() else None
+    """その物の手前マスクの元になった、人が塗った範囲（隙間に隠すときは両側の物の分。塗りから作っていない物は None）"""
+    paths = [ROUGH_MASK_DIR / path.name for path in p.front_masks()]
+    roughs = [np.asarray(Image.open(path).convert("L")) < 128 for path in paths if path.exists()]
+    return np.logical_or.reduce(roughs) if roughs else None
 
 
 def _panel(
@@ -42,15 +43,17 @@ def _panel(
     return image
 
 
-def save_hidden_crops(question_id: int, placements, alphas, background: np.ndarray, original: np.ndarray, harmonized: np.ndarray):
+def save_hidden_crops(
+    question_id: int, placements, alphas, background: np.ndarray, original: np.ndarray, harmonized: np.ndarray, out_dir
+):
     """物陰に隠れたキャラごとに「なじませる前・後・人が塗った範囲（青、手前マスクの縁を赤い線）・手前マスク（赤）」を並べて保存する"""
-    HIDDEN_CROP_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     for i, (p, alpha) in enumerate(zip(placements, alphas)):
         if not p.front_mask or not (alpha > 0.5).any():
             continue
         box = review_box(p, alpha)
         rough = _rough(p)
-        mask = box.cut(load_front_mask(p.front_mask))
+        mask = box.cut(hidden_region(background, p))
         rough_title = "rough (blue) / mask (red line)" if rough is not None else "rough: none / mask (red line)"
         panels = [
             _panel(original, box, "before"),
@@ -62,4 +65,4 @@ def save_hidden_crops(question_id: int, placements, alphas, background: np.ndarr
         for k, panel in enumerate(panels):
             sheet.paste(panel, (k * (REVIEW_PANEL_SIZE + 4), 0))
         kind = "real" if i == 0 else "fake"
-        sheet.save(HIDDEN_CROP_DIR / f"{question_id}_{i}_{kind}_{p.label or p.front_mask.stem}.png")
+        sheet.save(out_dir / f"{question_id}_{i}_{kind}_{p.label or p.front_masks()[0].stem}.png")

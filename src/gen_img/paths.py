@@ -20,6 +20,8 @@ HARD_OCCLUDER_DIR = OBJECT_MASK_DIR / "hard"
 QUESTION_MASK_DIR = HARMONIZED_QUESTION_DIR / "mask" / "question"
 # 物陰に隠れたキャラの切り出し（隠れ方の確認用。git には入れない）
 HIDDEN_CROP_DIR = HARMONIZED_QUESTION_DIR / "crop"
+# 2つの物の隙間からのぞく問題（question/ に画像、mask/ に手前マスク、crop/ に確認用の切り出し）
+GAP_QUESTION_DIR = HARMONIZED_QUESTION_DIR / "hidden"
 
 # 実験の結果（実験ごとにフォルダを分ける）
 EXP_DIR = ROOT_DIR / "exp"

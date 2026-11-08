@@ -20,6 +20,8 @@ img/
         normal/ 問題画像に使う物
         hard/   マスクの自動作成（SAM による塗り足し）がうまく補えない物。記録として残し、問題画像には使わない
       question/ 問題ごとの手前マスク（その問題でキャラを隠すのに使った物をまとめたもの）
+    hidden/     2つの物の隙間からのぞく問題（question/ 画像、mask/ 手前マスク、crop/ 確認用の切り出し）
+app/            Kaira君を探せのモックアプリ（YOLO をヒントに使う）と YOLO の学習ノートブック（app/README.md）
 exp/            実験の記録（中身は exp/README.md）、実験用のコードは exp/code/
 src/gen_img/
   paths.py      画像フォルダのパス
@@ -41,7 +43,7 @@ src/gen_img/
   harmonize/    AI（PHDiffusion）でなじませる
     questions.py  本番の問題画像を作る
     remote_infer.py  GPU サーバーで実行する部分
-    main.py, layouts.py, refine_remote.py  実験用
+    review.py   物陰に隠れたキャラの確認用の切り出し
 ```
 
 ## セットアップ
@@ -62,7 +64,28 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv sync
 ```
 
-## 使い方
+## アプリ（Kaira君を探せ）の起動
+
+問題を「作る」画面と「解く」画面があるブラウザアプリ（詳しくは [app/README.md](app/README.md)）。
+
+```sh
+uv sync                                # 初回だけ
+uv run python app/build_answers.py     # 初回と、用意した問題の配置を変えたときだけ（正解の枠を app/answers.json に書き出す）
+
+uv run --env-file .env \
+  --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
+  --with torch==2.6.0 --with torchvision==0.21.0 --with ultralytics \
+  python app/server.py
+```
+
+- 起動するとブラウザが開く。解く画面は http://localhost:8770/ 、作る画面は http://localhost:8770/create 。止めるときは Ctrl+C
+- 起動時に全問題を YOLO で検出するので、開くまで 15〜20 秒ほどかかる（GPU は要らない）
+- YOLO のモデルは `data/best.pt` を置いておく。`.env` の `GEMINI_API_KEY` は、作る画面で背景や Kaira君を Gemini で作るときに使う
+- `--index ...` は CPU 版の torch を使う指定（Linux で普通に入れると GPU 用の torch と CUDA まで落としてきて重い）
+- 試すだけなら `uv run python app/server.py` でも起動できる（YOLO なし。ヒントは正解の位置から作ったモックになる）
+- コードを直したら、起動し直さないと画面に反映されない
+
+## 問題画像の作り方
 
 背景を足して問題画像を作るまでの詳しい手順（手作業・GPU サーバーでの作業を含む）は [WORKFLOW.md](WORKFLOW.md) を参照。
 
@@ -86,4 +109,5 @@ uv run python -m gen_img.harmonize.questions merge          # img/harmonized_que
 問題 n は背景 `1 + (n-1) // NUM_QUESTIONS_PER_BACKGROUND` を使います（今は背景1枚につき5問、問題1〜5が背景1）。
 配置は `src/gen_img/question/config.py` の `QUESTIONS` で、各問題の先頭が本物、残りが偽物です。
 
+- 隙間からのぞく問題は `GAP_QUESTIONS` に書き、`front_mask=occluders("物1", "物2")` で両側の物を指定します。なじませるときは `--set gap` を付けます
 - `front_mask`：手前マスク（`img/harmonized_question/mask/object/normal/`）を指定すると、その物の後ろに隠れます。マスクは隠したい物を大まかに塗った画像（`mask/rough/`）から SAM で作ります（WORKFLOW.md の 2 章）

@@ -4,8 +4,8 @@
 docs/*
 work
 exp/*
-img/harmonized_question/crop/
-img/harmonized_question/mask/*
 data/*
 report/*
-app/data/
+# アプリ：用意した背景・キャラの絵（app/data/background, app/data/kaira）は git に入れ、ユーザー作・モデルは入れない
+app/data/user/
+app/data/model/

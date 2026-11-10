@@ -277,7 +277,7 @@ def occluders(*names: str) -> tuple:
     return tuple(occluder(name) for name in names)
 
 
-# 2つの物の隙間からのぞく問題（img/harmonized_question/hidden/）。問題番号: (背景番号, 配置)。各問題の先頭が本物。
+# 2つの物の隙間からのぞく問題（exp/img/harmonized_question/hidden/）。問題番号: (背景番号, 配置)。各問題の先頭が本物。
 # 本物だけが隙間にいると目立つので、偽物も別の隙間に入れる。
 # しっぽの無い偽物（fake/3）は、しっぽの隠れた本物と見分けられないので使わない
 GAP_QUESTIONS: dict[int, tuple[int, list[P]]] = {

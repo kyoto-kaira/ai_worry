@@ -1,13 +1,18 @@
 [project]
 name = "gen-img"
 version = "0.1.0"
-requires-python = ">=3.11"
+# torch 2.6.0（アプリの YOLO で使う）が Python 3.14 以降に対応していないので 3.13 まで
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "google-genai",
     "numpy",
     "pillow",
     "scikit-image",
     "scipy",
+    # アプリ（app/）の YOLO
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "ultralytics",
 ]
 
 [build-system]
@@ -16,3 +21,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen_img"]
+
+# torch は CPU 版を使う（PyPI のものは Linux だと GPU 用の CUDA まで入って重い。アプリの推論は CPU で足りる）
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -6,9 +6,9 @@
 
 | 段階 | やること | 手作業 | GPU | 出力 |
 |---|---|---|---|---|
-| 1. 背景 | テーマを書く → Gemini で生成 → 確認 → 線の太さを測る | テーマ・確認・設定 | 不要（API） | `img/background/<番号>.png` |
-| 2. 手前マスク | 隠したい物の内側を大まかに黒く塗る（はみ出さない）→ SAM で物体の端まで塗り足す → 確認 | 塗る・確認 | 必要 | `img/harmonized_question/mask/object/normal/<名前>.png` |
-| 3. 問題画像 | 配置を書く → 下見 → PHDiffusion でなじませる → 確認 | 配置・確認 | 必要 | `img/harmonized_question/question/<番号>.png` |
+| 1. 背景 | テーマを書く → Gemini で生成 → 確認 → 線の太さを測る | テーマ・確認・設定 | 不要（API） | `app/data/background/<番号>.png` |
+| 2. 手前マスク | 隠したい物の内側を大まかに黒く塗る（はみ出さない）→ SAM で物体の端まで塗り足す → 確認 | 塗る・確認 | 必要 | `exp/img/harmonized_question/mask/object/normal/<名前>.png` |
+| 3. 問題画像 | 配置を書く → 下見 → PHDiffusion でなじませる → 確認 | 配置・確認 | 必要 | `exp/img/harmonized_question/question/<番号>.png` |
 
 前提：`uv sync` 済み、`.env` に `GEMINI_API_KEY`（背景生成）と `VAST_API_KEY`（Vast.ai を使う場合）を書いておく。
 GPU の作業は「4. GPU サーバーの使い方」を参照。
@@ -20,7 +20,7 @@ GPU の作業は「4. GPU サーバーの使い方」を参照。
 キャラ画像は白黒＋透明の PNG（線は黒、体の中は白、外側としっぽの網目の間は透明）。
 しっぽは黒い線だけが体の一部で、網目の間は背景が見える。
 
-新しい偽物を足すときは、白い背景に黒い線で描いた画像を `img/kaira_kun/fake/` に置き、変換する（JPEG も PNG に置き換わる）。
+新しい偽物を足すときは、白い背景に黒い線で描いた画像を `app/data/kaira/fake/` に置き、変換する（JPEG も PNG に置き換わる）。
 
 ```sh
 uv run python -m gen_img.kaira_kun.main
@@ -51,8 +51,8 @@ THEMES = {
 ### 1-2. 生成する
 
 ```sh
-uv run --env-file .env python -m gen_img.background.main 6        # 背景6を作る（複数なら 6 7 8）
-uv run --env-file .env python -m gen_img.background.main 6 --force  # 作り直す（既存を上書き）
+uv run python -m gen_img.background.main 6        # 背景6を作る（複数なら 6 7 8）
+uv run python -m gen_img.background.main 6 --force  # 作り直す（既存を上書き）
 ```
 
 - 1枚あたり約 20 秒（Gemini API、`gemini-3-pro-image`）
@@ -60,7 +60,7 @@ uv run --env-file .env python -m gen_img.background.main 6 --force  # 作り直�
 
 ### 1-3. 目で確認する
 
-`img/background/<番号>.png` を開いて確認する。だめなら `--force` で作り直す（毎回違う絵になる）。
+`app/data/background/<番号>.png` を開いて確認する。だめなら `--force` で作り直す（毎回違う絵になる）。
 
 - Kaira 君に似たキャラ（脳みそのような形・網目の触手）がいない（いると答えが2つになる）
 - 白黒の線画になっている（灰色の塗り・文字が入っていない）
@@ -115,7 +115,7 @@ uv run python -c "from gen_img.question.tone import background_stroke, backgroun
 ```sh
 uv run python - <<'EOF'
 from PIL import Image, ImageDraw
-im = Image.open("img/background/6.png").convert("RGB")
+im = Image.open("app/data/background/6.png").convert("RGB")
 d = ImageDraw.Draw(im)
 for v in range(0, max(im.size), 50):
     color = (255, 0, 0) if v % 100 == 0 else (255, 170, 170)
@@ -130,7 +130,7 @@ EOF
 
 ### 2-2. 大まかに塗る
 
-背景と同じ大きさの画像に、隠したい物を黒で大まかに塗って `img/harmonized_question/mask/rough/<名前>.png` に置く（それ以外は白か透明）。
+背景と同じ大きさの画像に、隠したい物を黒で大まかに塗って `exp/img/harmonized_question/mask/rough/<名前>.png` に置く（それ以外は白か透明）。
 名前は `bg<背景番号>_<物>`（例：`bg6_barrel`）。ペイントソフトで背景の上に別レイヤーで塗り、そのレイヤーだけ書き出すとよい。
 
 **ルール：必ず物体の内側だけを塗る（物体からはみ出さない）。**
@@ -171,7 +171,7 @@ python segment_remote.py <work/mask を置いた場所>
 ### 2-4. 保存して確認する
 
 ```sh
-uv run python -m gen_img.mask.main finish bg6_barrel   # img/harmonized_question/mask/object/normal/ に保存（hard=True の物は object/hard/）
+uv run python -m gen_img.mask.main finish bg6_barrel   # exp/img/harmonized_question/mask/object/normal/ に保存（hard=True の物は object/hard/）
 ```
 
 SAM は1か所につき3つの候補を返す（物体の一部 / 物体 / 物体＋くっついている物 など）。塗った範囲から作るときは、候補ごとに
@@ -196,8 +196,8 @@ uv run python - <<'PY'
 import numpy as np
 from PIL import Image
 name, bg = "bg6_barrel", 6
-base = np.asarray(Image.open(f"img/background/{bg}.png").convert("RGB")).astype(float)
-m = np.asarray(Image.open(f"img/harmonized_question/mask/object/normal/{name}.png")) > 127
+base = np.asarray(Image.open(f"app/data/background/{bg}.png").convert("RGB")).astype(float)
+m = np.asarray(Image.open(f"exp/img/harmonized_question/mask/object/normal/{name}.png")) > 127
 base[m] = base[m] * 0.5 + np.array([255, 0, 0]) * 0.5
 Image.fromarray(base.astype(np.uint8)).save(f"work/check_{name}.png")
 PY
@@ -266,7 +266,7 @@ uv run python -m gen_img.mask.main lasso
 
 ### 3-1b. 2つの物の隙間からのぞく問題
 
-`src/gen_img/question/config.py` の `GAP_QUESTIONS` に書く（問題番号: (背景番号, 配置)）。出力は `img/harmonized_question/hidden/`。
+`src/gen_img/question/config.py` の `GAP_QUESTIONS` に書く（問題番号: (背景番号, 配置)）。出力は `exp/img/harmonized_question/hidden/`。
 `front_mask` に両側の物のマスクを `occluders("名前1", "名前2")` で渡すと、両方の後ろに隠れ、間の隙間から見える。
 
 置き場所は、両側の物それぞれが体の一部を隠し、頭・目・偽物の特徴が見える位置を自動で探して決める（実験用の道具）：
@@ -288,7 +288,7 @@ uv run python exp/code/gap_search/main.py 5 bg5_chair_left bg5_chair_right real/
 uv run python -c "from gen_img.question.compose import build_question; build_question(26).save('work/preview_26.png')"
 ```
 
-※ `python -m gen_img.question.main` は使わない（旧版の `img/question/` を上書きしてしまう）。
+※ `python -m gen_img.question.main` は使わない（旧版の `exp/img/question/` を上書きしてしまう）。
 
 ### 3-3. なじませる
 
@@ -300,7 +300,7 @@ uv run python -m gen_img.harmonize.questions prepare 26 27 28 29 30   # キャ�
 `outputs/PHDiffusion_s0.3/` を持ち帰って `work/harmonize/questions/outputs/` に置き、書き戻す。
 
 ```sh
-uv run python -m gen_img.harmonize.questions merge 26 27 28 29 30     # img/harmonized_question/ に保存
+uv run python -m gen_img.harmonize.questions merge 26 27 28 29 30     # exp/img/harmonized_question/ に保存
 ```
 
 GPU サーバーでの準備と実行（`/workspace/kaira` に jobs と remote_infer.py を置いた場合）：
@@ -337,7 +337,7 @@ uv run python - <<'EOF'
 from PIL import Image
 from gen_img.question.config import QUESTIONS
 q = 26
-im = Image.open(f"img/harmonized_question/question/{q}.png")
+im = Image.open(f"exp/img/harmonized_question/question/{q}.png")
 tiles = []
 for p in QUESTIONS[q]:
     w = int(p.width * 1.4); x0 = max(0, p.x - int(p.width * 0.2)); y0 = max(0, p.y - int(p.width * 0.25))
@@ -357,10 +357,10 @@ EOF
 
 ### 3-5. 出力
 
-- `img/harmonized_question/question/<番号>.png`：問題画像
-- `img/harmonized_question/mask/question/<番号>.png`：その問題でキャラを隠すのに使った手前マスク（物ごとのマスクをまとめたもの）
-- `img/harmonized_question/hidden/{question,mask,crop}/`：隙間の問題の同じもの
-- `img/harmonized_question/crop/<番号>_<何体目>_<real|fake>_<label>.png`：物陰に隠れたキャラごとに「なじませる前・後・人が塗った範囲（青。手前マスクの縁を赤い線で重ねる）・手前マスク（赤）」を並べたもの。隠れ方の違和感を調べるのに使う（git には入れない）。塗りから作っていないマスクは塗りの欄が `rough: none`
+- `exp/img/harmonized_question/question/<番号>.png`：問題画像
+- `exp/img/harmonized_question/mask/question/<番号>.png`：その問題でキャラを隠すのに使った手前マスク（物ごとのマスクをまとめたもの）
+- `exp/img/harmonized_question/hidden/{question,mask,crop}/`：隙間の問題の同じもの
+- `exp/img/harmonized_question/crop/<番号>_<何体目>_<real|fake>_<label>.png`：物陰に隠れたキャラごとに「なじませる前・後・人が塗った範囲（青。手前マスクの縁を赤い線で重ねる）・手前マスク（赤）」を並べたもの。隠れ方の違和感を調べるのに使う（git には入れない）。塗りから作っていないマスクは塗りの欄が `rough: none`
 
 ---
 

@@ -84,7 +84,7 @@ async function init() {
   labelQuestions();
   const y = info.yolo;
   $("yolo").textContent = y.mode === "yolo" ? "ヒント: YOLO" : "ヒント: モック";
-  $("yolo").title = y.mode === "yolo" ? "data/best.pt で検出" : `正解の位置から作ったモック（${y.reason}）`;
+  $("yolo").title = y.mode === "yolo" ? "app/data/model/best.pt で検出" : `正解の位置から作ったモック（${y.reason}）`;
   $("yolo").classList.toggle("yolo", y.mode === "yolo");
   $("question").onchange = () => load($("question").value);
   $("level").onchange = () => { labelQuestions(); load(q.id); };
@@ -121,8 +121,9 @@ async function load(id) {
   const rank = info.questions.find((x) => x.id === q.id).real_rank;
   $("hint").disabled = !lv.top;
   $("hintHelp").textContent = lv.top
-    ? `YOLO が「本物らしい」と推定した場所を、自信の高い順に上位 ${lv.top} か所まで丸で示します。押すたびに丸が小さくなります。`
-      + (rank === null || rank > lv.top ? " この問題では、YOLO の上位に本物が入っていません（AIも苦戦する問題）。" : "")
+    ? `YOLO が「本物らしい」と推定した場所を、最大 ${lv.top} 個の丸で示します（YOLO の推定が足りないときは、偽物の場所が混ざります）。`
+      + "丸の中心は少しずらしてあり、押すたびに丸が小さくなります。"
+      + (rank === null || rank > lv.top ? " この問題では YOLO が本物を見つけられていないので、丸の中に本物はいません（AIも苦戦する問題）。" : "")
     : "この難易度ではヒントは使えません。";
   img = new Image();
   img.onload = () => { fit(); draw(); };
@@ -144,24 +145,35 @@ function tick() {
   $("hints").textContent = state.hints;
 }
 
-// ヒント：YOLO の推定（本物らしさの確信度が高い順）の上位いくつかを、少しずらした丸で示す。
-// 上位に本物が入っていなければ、丸の中に本物はいない（AI のヒントなので外れることもある）。押すたびに丸を小さくする
+// ヒントにする場所：YOLO の候補（確信度が hint_confidence 以上、高い順）から top 個。
+// YOLO の候補が足りないときは、まだ選んでいない偽物をランダムに選んで埋める（丸の数で本物がばれないように）
+function hintTargets(top) {
+  const yolo = q.detections.filter((d) => !d.fake && d.conf >= info.hint_confidence).slice(0, top);
+  const used = new Set(yolo.map((d) => d.match));
+  const fakes = q.characters
+    .map((c, i) => ({ ...c, i }))
+    .filter((c) => c.kind === "fake" && !used.has(c.i))
+    .sort(() => Math.random() - 0.5);
+  return [...yolo.map((d) => d.box), ...fakes.slice(0, top - yolo.length).map((c) => c.box)];
+}
+
+// ヒント：丸を出す。丸の中心はキャラから少しずらす（中心を見れば答えがわかる、とならないように）。押すたびに丸を小さくする
 function showHint() {
   if (state.solved || state.revealed) return;
   const lv = info.levels[$("level").value];
   if (state.hints === 0) {
-    const top = q.detections.filter((d) => !d.fake).slice(0, lv.top);
-    if (!top.length) {
-      toast("YOLO はこの問題で候補を1つも出せなかった…", "var(--hint)");
-      return;
-    }
-    state.hintCircles = top.map(({ box: [x0, y0, x1, y1] }) => {
+    const targets = hintTargets(lv.top);
+    state.hintCircles = targets.map(([x0, y0, x1, y1]) => {
       const r = Math.max(x1 - x0, y1 - y0) * lv.hint_radius;
-      return { cx: (x0 + x1) / 2 + (Math.random() - 0.5) * r * 0.5, cy: (y0 + y1) / 2 + (Math.random() - 0.5) * r * 0.5, r };
+      const angle = Math.random() * Math.PI * 2, shift = r * (0.3 + Math.random() * 0.25);
+      return { tx: (x0 + x1) / 2, ty: (y0 + y1) / 2, ox: Math.cos(angle) * shift, oy: Math.sin(angle) * shift, r };
     });
-    toast(`YOLO の上位 ${top.length} 候補（自信 ${percent(top[0].conf)}〜${percent(top.at(-1).conf)}）`, "var(--hint)");
+    toast(`ヒントの丸を ${targets.length} 個出しました`, "var(--hint)");
   } else {
-    for (const c of state.hintCircles) c.r = Math.max(c.r * 0.75, 30);
+    for (const c of state.hintCircles) {
+      const k = Math.max(c.r * 0.75, 30) / c.r;
+      c.r *= k; c.ox *= k; c.oy *= k;
+    }
   }
   state.hints += 1;
   draw();
@@ -213,7 +225,7 @@ function draw() {
   ctx.lineWidth = lw * 1.5;
   for (const c of state.hintCircles) {
     ctx.strokeStyle = "rgba(214,158,46,.9)"; ctx.setLineDash([8 / view.scale, 6 / view.scale]);
-    ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(c.tx + c.ox, c.ty + c.oy, c.r, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.setLineDash([]);
   for (const m of state.marks) {
@@ -233,7 +245,7 @@ function draw() {
     // YOLO の推定の上位（青い点線と確信度。一番多くヒントに出す数まで）
     ctx.strokeStyle = "#3182ce"; ctx.fillStyle = "#3182ce"; ctx.lineWidth = lw; ctx.setLineDash([4 / view.scale, 4 / view.scale]);
     const maxTop = Math.max(...Object.values(info.levels).map((lv) => lv.top));
-    for (const d of q.detections.filter((d) => !d.fake).slice(0, maxTop)) {
+    for (const d of q.detections.filter((d) => !d.fake && d.conf >= info.hint_confidence).slice(0, maxTop)) {
       const [x0, y0, x1, y1] = d.box;
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       ctx.fillText(percent(d.conf), x0, y1 + 14 / view.scale);

@@ -5,26 +5,19 @@
 ## 構成
 
 ```
-img/
-  background/   Kaira君がいない背景
-  kaira_kun/    白黒＋透明の PNG（線は黒、体の中は白、外側としっぽの網目の間は透明）
-    real/       本物（正解）
-    fake/       偽物
-  question/     問題画像（旧版・10枚。AI でなじませる前のもの）
-  harmonized_question/
-    question/   問題画像 25 枚（背景 + 本物1体 + 偽物、AI でなじませたもの）
-    crop/       物陰に隠れたキャラの比較（なじませる前・後・塗った範囲・手前マスク。git に入れない）
-    mask/
-      rough/    人が隠したい物の内側を大まかに黒く塗った画像（物体からはみ出さない。物ごとのマスクの元）
-      object/   物ごとの手前マスク（茂み・サンゴ・建物など。gen_img.mask で作る。白 = キャラより手前）
-        normal/ 問題画像に使う物
-        hard/   マスクの自動作成（SAM による塗り足し）がうまく補えない物。記録として残し、問題画像には使わない
-      question/ 問題ごとの手前マスク（その問題でキャラを隠すのに使った物をまとめたもの）
-    hidden/     2つの物の隙間からのぞく問題（question/ 画像、mask/ 手前マスク、crop/ 確認用の切り出し）
-app/            Kaira君を探せのモックアプリ（YOLO をヒントに使う）と YOLO の学習ノートブック（app/README.md）
-exp/            実験の記録（中身は exp/README.md）、実験用のコードは exp/code/
+app/            Kaira君を探せのアプリ（YOLO をヒントに使う。詳しくは app/README.md）
+  data/         アプリが使う絵・モデル・作ったもの
+    background/   Kaira君がいない背景（git に入れる）
+    kaira/        白黒＋透明の PNG（線は黒、体の中は白、外側としっぽの網目の間は透明。git に入れる）
+      real/       本物（正解）
+      fake/       偽物
+    model/best.pt YOLO のモデル（git に入れない。別に受け取って置く）
+    builtin/      用意した問題の画像・正解・YOLO の検出結果（app/build.py が作る。git に入れない）
+    user/         アプリで作った背景・偽物・問題（git に入れない）
+exp/            実験の記録（中身は exp/README.md。git に入れない）、実験用のコードは exp/code/
+  img/          物陰に隠して AI でなじませる、前のやり方の成果物（問題画像・手前マスク・確認用の切り出し）
 src/gen_img/
-  paths.py      画像フォルダのパス
+  paths.py      絵のフォルダのパス（アプリの絵は app/data/、前のやり方の成果物は exp/img/）
   background/   背景の生成（Gemini API）
     config.py   モデル・プロンプト・テーマ
     generate.py
@@ -64,25 +57,33 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv sync
 ```
 
+Python は **3.13** を使います（リポジトリ直下の `.python-version` で指定。uv が自動で 3.13 を用意するので、コマンドで指定しなくてよい）。
+アプリで使う torch 2.6.0 は Python 3.14 以降に対応していないので、`pyproject.toml` でも 3.13 までに制限しています。
+前に別のバージョンで `.venv` を作っていても、`uv sync` で 3.13 に作り直されます。
+
+Gemini の API キーは、リポジトリ直下の `.env` に `GEMINI_API_KEY=...` と書いておきます。プログラムが起動時に自動で読むので、`--env-file` は要りません。
+
+コマンドは Windows（PowerShell・コマンドプロンプト）でも Mac・Linux でも同じです。
+ただし、ARM の Windows（Snapdragon など）には torch 2.6.0 の配布物がないので、YOLO を使うアプリは動きません（Intel・AMD の Windows なら動く）。
+
 ## アプリ（Kaira君を探せ）の起動
 
 問題を「作る」画面と「解く」画面があるブラウザアプリ（詳しくは [app/README.md](app/README.md)）。
 
 ```sh
-uv sync                                # 初回だけ
-uv run python app/build_answers.py     # 初回と、用意した問題の配置を変えたときだけ（正解の枠を app/answers.json に書き出す）
+uv sync                                # 初回だけ（torch・ultralytics も入る）
+uv run python app/build.py              # 初回と、用意した問題の配置や YOLO のモデルを変えたときだけ（問題画像・正解・YOLO の検出結果を app/data/builtin/ に作る。約3分）
 
-uv run --env-file .env \
-  --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
-  --with torch==2.6.0 --with torchvision==0.21.0 --with ultralytics \
-  python app/server.py
+uv run python app/server.py
 ```
 
 - 起動するとブラウザが開く。解く画面は http://localhost:8770/ 、作る画面は http://localhost:8770/create 。止めるときは Ctrl+C
-- 起動時に全問題を YOLO で検出するので、開くまで 15〜20 秒ほどかかる（GPU は要らない）
-- YOLO のモデルは `data/best.pt` を置いておく。`.env` の `GEMINI_API_KEY` は、作る画面で背景や Kaira君を Gemini で作るときに使う
-- `--index ...` は CPU 版の torch を使う指定（Linux で普通に入れると GPU 用の torch と CUDA まで落としてきて重い）
-- 試すだけなら `uv run python app/server.py` でも起動できる（YOLO なし。ヒントは正解の位置から作ったモックになる）
+- YOLO の検出結果は `build.py`（用意した問題）と登録のとき（作った問題）に保存してあるので、起動は数秒（GPU は要らない）。
+  モデル（`app/data/model/best.pt`）や推論の設定を変えると、古い結果は起動時に自動で検出し直す
+- YOLO のモデルは `app/data/model/best.pt` を置いておく。`.env` の `GEMINI_API_KEY` は、作る画面で背景や Kaira君を Gemini で作るときに使う
+- YOLO に使う torch・ultralytics はプロジェクトの依存に入っていて、`uv sync` で一度入れれば毎回のダウンロードはない。
+  torch は CPU 版を使う設定にしてある（`pyproject.toml` の `[tool.uv.sources]`。Linux で普通に入れると GPU 用の CUDA まで入って重い）
+- `app/data/model/best.pt` がないときは、ヒントが正解の位置から作ったモックになる（画面右上に「ヒント: モック」と出る）
 - コードを直したら、起動し直さないと画面に反映されない
 
 ## 問題画像の作り方
@@ -91,7 +92,7 @@ uv run --env-file .env \
 
 ```sh
 # 背景を生成（.env に GEMINI_API_KEY を書いておく）
-uv run --env-file .env python -m gen_img.background.main 3 4 5   # 既存は --force で上書き
+uv run python -m gen_img.background.main 3 4 5   # 既存は --force で上書き
 
 # 手前マスクを作る（茂み・サンゴは SAM、ロボットは多角形）
 uv run python -m gen_img.mask.main prepare   # work/mask に背景と targets.json を用意
@@ -103,11 +104,11 @@ uv run python -m gen_img.mask.main lasso     # 多角形から作るマスク（
 uv run python -m gen_img.harmonize.questions prepare        # キャラごとの切り出しを work/ に作る
 # work/harmonize/questions/jobs と remote_infer.py を GPU サーバーに送り、
 #   python remote_infer.py <作業フォルダ> --strengths 0.3  を実行して outputs/ を持ち帰る
-uv run python -m gen_img.harmonize.questions merge          # img/harmonized_question/ に書き出す
+uv run python -m gen_img.harmonize.questions merge          # exp/img/harmonized_question/ に書き出す
 ```
 
 問題 n は背景 `1 + (n-1) // NUM_QUESTIONS_PER_BACKGROUND` を使います（今は背景1枚につき5問、問題1〜5が背景1）。
 配置は `src/gen_img/question/config.py` の `QUESTIONS` で、各問題の先頭が本物、残りが偽物です。
 
 - 隙間からのぞく問題は `GAP_QUESTIONS` に書き、`front_mask=occluders("物1", "物2")` で両側の物を指定します。なじませるときは `--set gap` を付けます
-- `front_mask`：手前マスク（`img/harmonized_question/mask/object/normal/`）を指定すると、その物の後ろに隠れます。マスクは隠したい物を大まかに塗った画像（`mask/rough/`）から SAM で作ります（WORKFLOW.md の 2 章）
+- `front_mask`：手前マスク（`exp/img/harmonized_question/mask/object/normal/`）を指定すると、その物の後ろに隠れます。マスクは隠したい物を大まかに塗った画像（`mask/rough/`）から SAM で作ります（WORKFLOW.md の 2 章）

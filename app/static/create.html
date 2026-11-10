@@ -60,9 +60,13 @@
     <select id="background" style="width:100%"></select>
     <details>
       <summary>Gemini で新しい背景を作る</summary>
-      <p class="help">どんな場面を描きたいか、下の欄に書いてください。できるまで約20秒かかります。物がたくさん描き込まれた場面ほど、難しい問題になります。</p>
-      <textarea id="theme"></textarea>
-      <button id="generate">背景を作る</button>
+      <p class="help">① どんな場面にしたいか、短く書いて「説明を作る」を押してください。Gemini が、絵にする場面の説明を詳しく書きます。</p>
+      <input type="text" id="theme">
+      <div class="row" style="margin-top:6px"><button id="describe">説明を作る</button></div>
+      <p class="help">② 説明を読んで、直したい所があれば書き直してください。「この説明で背景を作る」を押すと絵ができます（約20秒）。物がたくさん描き込まれた場面ほど、難しい問題になります。</p>
+      <textarea id="scene" style="height:120px"></textarea>
+      <label style="display:flex; gap:6px; align-items:flex-start; margin-top:6px"><input type="checkbox" id="decoy" style="margin-top:3px"><span>Kaira君っぽい生き物を紛れ込ませる（人が迷いやすくなる）</span></label>
+      <div class="row" style="margin-top:6px"><button id="generate" disabled>この説明で背景を作る</button></div>
     </details>
 
     <h2>2. Kaira君を置く</h2>
@@ -79,16 +83,20 @@
     <p class="help">難しくしたいときは、偽物を増やす・小さくする・本物との違いが小さい偽物を選ぶ、を試してみてください。</p>
 
     <details>
-      <summary>新しい Kaira君を作る（Gemini）</summary>
-      <p class="help">本物の Kaira君をどう描き変えたいか、下の欄に書いてください。偽物を作るときは、見分けるポイントも書いてください。できるまで約20秒かかります。</p>
-      <div class="row"><label><input type="radio" name="kind" value="fake" checked> 偽物</label><label><input type="radio" name="kind" value="real"> 本物</label></div>
+      <summary>新しい偽物を作る（Gemini）</summary>
+      <p class="help">本物の Kaira君をどう描き変えた偽物にしたいか書いて、「偽物を作る」を押してください（約20秒）。本物は作れません。</p>
       <textarea id="kairaPrompt" placeholder="例：頭に小さなシルクハットをのせる"></textarea>
-      <input type="text" id="kairaLabel" placeholder="見分けるポイント（例：シルクハット）" maxlength="12">
-      <div class="row" style="margin-top:6px"><button id="makeKaira">Kaira君を作る</button></div>
+      <div class="row" style="margin-top:6px"><button id="makeKaira">偽物を作る</button></div>
+      <div id="fakePreview" hidden>
+        <img id="fakeImg" alt="作った偽物" style="width:100%; margin-top:6px; border:1px solid var(--line); border-radius:6px; background:#fff">
+        <p class="help">気に入ったら、見分けるポイント（この偽物の名前）を書いて保存してください。名前を書かないと保存されません。</p>
+        <input type="text" id="kairaLabel" placeholder="見分けるポイント（例：シルクハット）" maxlength="12">
+        <div class="row" style="margin-top:6px"><button id="saveFake" class="primary" disabled>パレットに保存</button><button id="discardFake">やめる</button></div>
+      </div>
     </details>
 
     <h2>3. 登録</h2>
-    <input type="text" id="title" placeholder="問題の名前" maxlength="40">
+    <input type="text" id="title" placeholder="問題の名前（必須）" maxlength="40">
     <input type="text" id="author" placeholder="作った人の名前" maxlength="20" style="margin-top:6px">
     <div class="row" style="margin-top:8px"><button id="register" class="primary" disabled>この問題を登録する</button></div>
     <p class="help" id="status"></p>
@@ -149,8 +157,14 @@ async function init() {
   $("flip").onchange = $("names").onchange = draw;
   $("background").onchange = () => setBackground($("background").value);
   $("clear").onclick = () => { placements = []; changed(); };
+  $("describe").onclick = describeScene;
+  $("scene").oninput = () => { $("generate").disabled = !$("scene").value.trim(); };
   $("generate").onclick = generateBackground;
   $("makeKaira").onclick = makeKaira;
+  $("kairaLabel").oninput = () => { $("saveFake").disabled = !$("kairaLabel").value.trim(); };
+  $("saveFake").onclick = saveFake;
+  $("discardFake").onclick = () => { fakeDraft = null; $("fakePreview").hidden = true; $("status").textContent = "作った偽物は保存しませんでした。"; };
+  $("title").oninput = changed;
   $("register").onclick = register;
   buildPalette();
   setBackground(options.backgrounds[0].id);
@@ -313,21 +327,42 @@ canvas.addEventListener("click", async (e) => {
   changed();
 });
 
+// 登録できるのは、本物1体と偽物1体以上を置いて、問題の名前を書いたとき
 function changed() {
   const reals = placements.filter((p) => p.kind === "real").length, fakes = placements.length - reals;
+  const titled = !!$("title").value.trim();
   $("realCount").textContent = reals; $("fakeCount").textContent = fakes;
-  $("register").disabled = !(reals === 1 && fakes >= 1);
-  $("status").textContent = reals === 1 && fakes >= 1 ? "" : "本物を1体と、偽物を1体以上置いてください。置くと登録できます。";
+  $("register").disabled = !(reals === 1 && fakes >= 1 && titled);
+  $("status").textContent = !(reals === 1 && fakes >= 1)
+    ? "本物を1体と、偽物を1体以上置いてください。"
+    : titled ? "" : "問題の名前を書いてください。書かないと登録できません。";
   $("result").style.display = "none";
   draw();
 }
 
+// 背景作りの1段階目：短いテーマから、Gemini に場面の詳しい説明を書かせる（画面で直せる）
+async function describeScene() {
+  const theme = $("theme").value.trim() || options.theme_example;
+  $("theme").value = theme;
+  $("describe").disabled = true;
+  $("status").textContent = "Gemini が場面の説明を書いています…";
+  try {
+    $("scene").value = (await post("/api/create/scene", { theme })).scene;
+    $("generate").disabled = false;
+    $("status").textContent = "説明ができました。読んで、直したい所があれば書き直してください。";
+  } catch (e) {
+    $("status").textContent = `説明を作れませんでした：${e.message}`;
+  }
+  $("describe").disabled = false;
+}
+
+// 背景作りの2段階目：説明をもとに絵を描かせる
 async function generateBackground() {
   const theme = $("theme").value.trim() || options.theme_example;
   $("generate").disabled = true;
   $("status").textContent = "Gemini で背景を作っています…（約20秒）";
   try {
-    const b = await post("/api/create/background", { theme });
+    const b = await post("/api/create/background", { theme, scene: $("scene").value.trim(), decoy: $("decoy").checked });
     options.backgrounds.push(b);
     $("background").add(new Option(b.label, b.id));
     setBackground(b.id);
@@ -335,24 +370,41 @@ async function generateBackground() {
   } catch (e) {
     $("status").textContent = `背景を作れませんでした：${e.message}`;
   }
-  $("generate").disabled = false;
+  $("generate").disabled = !$("scene").value.trim();
 }
 
+// 偽物を作って見せる。見分けるポイント（名前）を書いて保存したときだけ、パレットに入る
+let fakeDraft = null;
 async function makeKaira() {
   const prompt = $("kairaPrompt").value.trim();
   if (!prompt) { $("status").textContent = "どう描き変えたいかを書いてください。"; return; }
-  const kind = document.querySelector("input[name=kind]:checked").value;
   $("makeKaira").disabled = true;
-  $("status").textContent = "Gemini で Kaira君を描き変えています…（約20秒）";
+  $("status").textContent = "Gemini で偽物を作っています…（約20秒）";
   try {
-    const made = await post("/api/create/kaira", { kind, prompt, label: $("kairaLabel").value.trim() });
-    options = { ...options, ...(await (await fetch("/api/create/options")).json()) };
-    buildPalette(made);
-    $("status").textContent = `できた Kaira君をパレットに追加しました（＊が付いた絵）。${kind === "real" ? "描き変えた本物は、YOLO が見つけにくいことがあります。" : ""}`;
+    const made = await post("/api/create/fake", { prompt });
+    fakeDraft = made.draft;
+    $("fakeImg").src = made.preview;
+    $("kairaLabel").value = "";
+    $("saveFake").disabled = true;
+    $("fakePreview").hidden = false;
+    $("status").textContent = "偽物ができました。見分けるポイントを書いて保存してください。";
   } catch (e) {
-    $("status").textContent = `Kaira君を作れませんでした：${e.message}`;
+    $("status").textContent = `偽物を作れませんでした：${e.message}`;
   }
   $("makeKaira").disabled = false;
+}
+
+async function saveFake() {
+  try {
+    const made = await post("/api/create/fake/save", { draft: fakeDraft, label: $("kairaLabel").value.trim() });
+    fakeDraft = null;
+    $("fakePreview").hidden = true;
+    options = { ...options, ...(await (await fetch("/api/create/options")).json()) };
+    buildPalette(made);
+    $("status").textContent = `「${made.label}」をパレットに保存しました（＊が付いた絵）。`;
+  } catch (e) {
+    $("status").textContent = `保存できませんでした：${e.message}`;
+  }
 }
 
 async function register() {

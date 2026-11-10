@@ -32,7 +32,7 @@ class QuestionSet:
 
 
 QUESTION_SETS = {
-    # 通常の問題（img/harmonized_question/question/）
+    # 通常の問題（exp/img/harmonized_question/question/）
     "question": QuestionSet(
         "q",
         {q: (background_id(q), placements) for q, placements in QUESTIONS.items()},
@@ -40,7 +40,7 @@ QUESTION_SETS = {
         QUESTION_MASK_DIR,
         HIDDEN_CROP_DIR,
     ),
-    # 2つの物の隙間からのぞく問題（img/harmonized_question/hidden/）
+    # 2つの物の隙間からのぞく問題（exp/img/harmonized_question/hidden/）
     "gap": QuestionSet(
         "g", GAP_QUESTIONS, GAP_QUESTION_DIR / "question", GAP_QUESTION_DIR / "mask", GAP_QUESTION_DIR / "crop"
     ),

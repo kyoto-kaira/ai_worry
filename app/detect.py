@@ -1,4 +1,6 @@
+import json
 import random
+import zlib
 
 from config import KAIRA_CLASS_WORDS, MATCH_IOU, MODEL_PATH, YOLO_CONFIDENCE, YOLO_IMAGE_SIZE, YOLO_MAX_DETECTIONS
 
@@ -33,6 +35,14 @@ class Detector:
     def mode(self) -> str:
         return "yolo" if self.model else "mock"
 
+    @property
+    def key(self) -> str:
+        """保存した検出結果がどのモデル・設定で作ったものか。モデルのファイルや推論の設定が変わったら別の値になる"""
+        if not self.model:
+            return "mock"
+        stat = MODEL_PATH.stat()
+        return f"{MODEL_PATH.name}|{stat.st_size}|{stat.st_mtime_ns}|{YOLO_IMAGE_SIZE}|{YOLO_CONFIDENCE}|{YOLO_MAX_DETECTIONS}"
+
     def detect(self, image_path, answer: dict, seed: int) -> list[dict]:
         """候補の枠と確信度（高い順）。正解のキャラと重なる候補には、そのキャラの番号（match。0 = 本物）を付ける。
         fake は「偽物」クラスの候補（偽物も見分けるモデルの場合）"""
@@ -66,3 +76,20 @@ def mock_boxes(answer: dict, seed: int) -> list[dict]:
     jitter = lambda size: round(rng.uniform(-0.06, 0.06) * size)
     conf = rng.uniform(0.15, 0.5) if real["hidden"] else rng.uniform(0.7, 0.95)
     return [{"box": [x0 + jitter(w), y0 + jitter(h), x1 + jitter(w), y1 + jitter(h)], "conf": round(conf, 3), "fake": False}]
+
+
+def seed_of(question_id: str) -> int:
+    """モックの候補をずらす乱数のもと（問題ごとに毎回同じ値にする）"""
+    return zlib.crc32(question_id.encode()) % 1000
+
+
+def load_detections(path, key: str) -> dict[str, list[dict]]:
+    """保存した検出結果（問題番号ごと）。同じモデル・設定（key）で作ったものでなければ空"""
+    if not path.exists():
+        return {}
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    return saved["detections"] if saved.get("key") == key else {}
+
+
+def save_detections(path, key: str, detections: dict[str, list[dict]]):
+    path.write_text(json.dumps({"key": key, "detections": detections}, ensure_ascii=False), encoding="utf-8")

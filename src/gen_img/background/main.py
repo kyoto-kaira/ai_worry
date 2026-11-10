@@ -5,6 +5,7 @@ from google import genai
 
 from gen_img.background.config import THEMES
 from gen_img.background.generate import generate_background
+from gen_img.env import load_env
 from gen_img.paths import BACKGROUND_DIR
 
 
@@ -14,6 +15,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="overwrite existing images")
     args = parser.parse_args()
 
+    load_env()
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     for bg_id in args.ids:
         out = BACKGROUND_DIR / f"{bg_id}.png"

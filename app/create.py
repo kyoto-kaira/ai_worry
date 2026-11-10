@@ -9,7 +9,8 @@ import numpy as np
 from PIL import Image
 
 from config import (
-    FAKE_FEATURES, GEMINI_TRIES, GENERATED_BLUR, KAIRA_BASE, KAIRA_PROMPT, USER_BACKGROUND_DIR, USER_KAIRA_DIR, USER_QUESTION_DIR,
+    BACKGROUND_BASE_PROMPT, DECOY_KAIRA_PROMPT, FAKE_FEATURES, GEMINI_TRIES, GENERATED_BLUR, KAIRA_BASE, KAIRA_PROMPT,
+    NO_KAIRA_PROMPT, SCENE_PROMPT, TEXT_MODEL, USER_BACKGROUND_DIR, USER_FAKE_DIR, USER_QUESTION_DIR,
 )
 from gen_img.kaira_kun.transparent import on_white, to_transparent
 from gen_img.paths import BACKGROUND_DIR, FAKE_DIR, REAL_DIR
@@ -23,7 +24,7 @@ def gemini_client():
     from google import genai
 
     if not os.environ.get("GEMINI_API_KEY"):
-        raise RuntimeError("GEMINI_API_KEY が設定されていない（.env に書いて --env-file .env で起動する）")
+        raise RuntimeError("GEMINI_API_KEY が設定されていない（リポジトリ直下の .env に GEMINI_API_KEY=... と書いて、起動し直す）")
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
@@ -44,12 +45,36 @@ def no_image_message(finish_reason) -> str:
     return "Gemini から絵が返ってきませんでした。もう一度試すか、別の言い方で書いてみてください"
 
 
+def gemini_image(contents: list) -> Image.Image:
+    """Gemini の画像のモデルに描かせる。画像のない応答なら何回か頼み直し、安全チェックで断られたらすぐあきらめる"""
+    from google.genai import types
+
+    from gen_img.background.config import MODEL
+
+    client = gemini_client()  # 変数に持っておかないと、リクエストを送る前にクライアントが閉じられる
+    candidate = None
+    for _ in range(GEMINI_TRIES):
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="1:1")),
+        )
+        candidate = response.candidates[0] if response.candidates else None
+        parts = (candidate.content.parts if candidate and candidate.content else None) or []
+        image = next((Image.open(io.BytesIO(p.inline_data.data)) for p in parts if p.inline_data), None)
+        if image is not None:
+            return image
+        if candidate and refused(candidate.finish_reason):
+            break
+    raise RuntimeError(no_image_message(candidate.finish_reason if candidate else None))
+
+
 # ---- 背景 ----
 def backgrounds() -> list[dict]:
     """選べる背景：既存の背景（b<番号>）と、Gemini で生成した背景（g<時刻>）"""
     rows = [{"id": f"b{p.stem}", "label": f"背景{p.stem}"} for p in sorted(BACKGROUND_DIR.glob("*.png"), key=lambda p: int(p.stem))]
     for meta in sorted(USER_BACKGROUND_DIR.glob("*.json")):
-        rows.append({"id": meta.stem, "label": f"生成: {json.loads(meta.read_text())['theme'][:30]}"})
+        rows.append({"id": meta.stem, "label": background_label(json.loads(meta.read_text(encoding="utf-8")))})
     return rows
 
 
@@ -57,20 +82,33 @@ def background_path(bg_id: str):
     return BACKGROUND_DIR / f"{bg_id[1:]}.png" if bg_id.startswith("b") else USER_BACKGROUND_DIR / f"{bg_id}.png"
 
 
-def generate_background(theme: str) -> dict:
-    """テーマから Gemini で背景を生成して保存する（1枚 約20秒）"""
-    from gen_img.background.generate import NoImageError, generate_from_theme
-
+def describe_scene(theme: str) -> str:
+    """背景作りの1段階目：短いテーマから、文章のモデルに場面の詳しい説明（日本語）を書かせる"""
     client = gemini_client()
-    try:
-        image = generate_from_theme(client, theme)
-    except NoImageError as e:
-        raise RuntimeError(no_image_message(e.finish_reason)) from e
+    response = client.models.generate_content(model=TEXT_MODEL, contents=SCENE_PROMPT.format(theme=theme))
+    if not response.text:
+        raise RuntimeError("Gemini から説明が返ってきませんでした。もう一度試してください")
+    return response.text.strip()
+
+
+def generate_background(theme: str, scene: str, decoy: bool) -> dict:
+    """背景作りの2段階目：場面の説明と、共通の画風・構図の指示で背景を描かせて保存する（1枚 約20秒）。
+    decoy なら Kaira君に似た生き物をわざと紛れ込ませる"""
+    from gen_img.background.config import REFERENCE_NOTE, STYLE_REFERENCES
+
+    prompt = f"{REFERENCE_NOTE} SCENE: {scene} {BACKGROUND_BASE_PROMPT}{DECOY_KAIRA_PROMPT if decoy else NO_KAIRA_PROMPT}"
+    references = [Image.open(p) for p in STYLE_REFERENCES if p.exists()]
+    image = gemini_image([*references, prompt]).convert("L").convert("RGB")
     bg_id = f"g{int(time.time())}"
     USER_BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
     image.save(USER_BACKGROUND_DIR / f"{bg_id}.png")
-    (USER_BACKGROUND_DIR / f"{bg_id}.json").write_text(json.dumps({"theme": theme}, ensure_ascii=False))
-    return {"id": bg_id, "label": f"生成: {theme[:30]}"}
+    meta = {"theme": theme, "scene": scene, "decoy": decoy}
+    (USER_BACKGROUND_DIR / f"{bg_id}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return {"id": bg_id, "label": background_label(meta)}
+
+
+def background_label(meta: dict) -> str:
+    return f"生成: {meta['theme'][:30]}" + ("（Kaira君っぽい生き物あり）" if meta.get("decoy") else "")
 
 
 @lru_cache(maxsize=32)
@@ -82,70 +120,56 @@ def background_style(bg_id: str) -> tuple[np.ndarray, float, tuple[float, float]
 
 
 # ---- キャラ ----
-# 絵の名前：用意した絵は "1.png" など、プロンプトで作った絵は "k<連番>.png"（app/data/kaira/<real|fake>/ に置く）
+# 絵の名前：用意した絵は "1.png" など、プロンプトで作った偽物は "k<連番>.png"（USER_FAKE_DIR に置く）。
+# 本物は用意した絵だけを使う（作れるのは偽物だけ）
 def character_path(kind: str, name: str):
-    if name.startswith("k"):
-        return USER_KAIRA_DIR / kind / name
-    return (REAL_DIR if kind == "real" else FAKE_DIR) / name
+    if kind == "real":
+        return REAL_DIR / name
+    return (USER_FAKE_DIR if name.startswith("k") else FAKE_DIR) / name
 
 
-def _user_meta(kind: str, name: str) -> dict:
-    path = USER_KAIRA_DIR / kind / name.replace(".png", ".json")
-    return json.loads(path.read_text()) if path.exists() else {}
+def _made_meta(name: str) -> dict:
+    path = USER_FAKE_DIR / name.replace(".png", ".json")
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def feature(name: str) -> str | None:
     """偽物の見分けるポイント（プロンプトで作った偽物は、作るときに付けた名前）"""
-    return FAKE_FEATURES.get(name) or _user_meta("fake", name).get("label")
+    return FAKE_FEATURES.get(name) or _made_meta(name).get("label")
 
 
 def characters() -> dict:
-    """パレットに出す本物と偽物"""
-    def rows(kind, builtin_dir):
-        builtin = sorted(builtin_dir.glob("*.png"), key=lambda p: int(p.stem))
-        made = sorted((USER_KAIRA_DIR / kind).glob("k*.png"), key=lambda p: int(p.stem[1:]))
-        return [
-            {"name": p.name, "label": (feature(p.name) if kind == "fake" else _user_meta(kind, p.name).get("label")) or f"本物{p.stem}", "made": p in made}
-            for p in builtin + made
-        ]
-    return {"real": rows("real", REAL_DIR), "fake": rows("fake", FAKE_DIR)}
+    """パレットに出す本物（用意した絵）と偽物（用意した絵＋プロンプトで作った絵）"""
+    by_number = lambda p: int(p.stem.lstrip("k"))
+    made = sorted(USER_FAKE_DIR.glob("k*.png"), key=by_number)
+    return {
+        "real": [{"name": p.name, "label": f"本物{p.stem}", "made": False} for p in sorted(REAL_DIR.glob("*.png"), key=by_number)],
+        "fake": [
+            {"name": p.name, "label": feature(p.name) or "", "made": p in made}
+            for p in sorted(FAKE_DIR.glob("*.png"), key=by_number) + made
+        ],
+    }
 
 
-def generate_kaira(kind: str, prompt: str, label: str) -> dict:
-    """本物の絵をもとに、プロンプトのとおりに描き変えた Kaira君を Gemini で作り、白黒＋透明の絵にして保存する"""
-    from google.genai import types
-
-    from gen_img.background.config import MODEL
-
+def generate_fake(prompt: str) -> Image.Image:
+    """本物の絵をもとに、プロンプトのとおりに描き変えた偽物を Gemini で作る（まだ保存しない。見分けるポイントを付けたら save_fake で保存）"""
     base = Image.open(KAIRA_BASE)
     white = Image.fromarray(on_white(base).astype(np.uint8)).convert("RGB")
-    client = gemini_client()  # 変数に持っておかないと、リクエストを送る前にクライアントが閉じられる
-    # Gemini はときどき画像のない応答を返すので、何回か頼み直す
-    for _ in range(GEMINI_TRIES):
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=[white, KAIRA_PROMPT.format(prompt=prompt)],
-            config=types.GenerateContentConfig(response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="1:1")),
-        )
-        candidate = response.candidates[0] if response.candidates else None
-        parts = (candidate.content.parts if candidate and candidate.content else None) or []
-        image = next((Image.open(io.BytesIO(p.inline_data.data)) for p in parts if p.inline_data), None)
-        if image is not None:
-            return save_kaira(kind, image.convert("L").resize(base.size, Image.LANCZOS), prompt, label)
-        if candidate and refused(candidate.finish_reason):
-            break
-    raise RuntimeError(no_image_message(candidate.finish_reason if candidate else None))
+    image = gemini_image([white, KAIRA_PROMPT.format(prompt=prompt)])
+    return to_transparent(image.convert("L").resize(base.size, Image.LANCZOS))
 
 
-def save_kaira(kind: str, image: Image.Image, prompt: str, label: str) -> dict:
-    folder = USER_KAIRA_DIR / kind
+def save_fake(image: Image.Image, prompt: str, label: str) -> dict:
+    """作った偽物を、見分けるポイント（名前）を付けて保存する。名前がなければ保存しない"""
+    if not label.strip():
+        raise ValueError("見分けるポイントを書いてください（書かないと保存されません）")
+    folder = USER_FAKE_DIR
     folder.mkdir(parents=True, exist_ok=True)
     numbers = [int(p.stem[1:]) for p in folder.glob("k*.png")]
     name = f"k{max(numbers, default=0) + 1}.png"
-    to_transparent(image).save(folder / name)
-    label = label or prompt[:12]
-    (folder / name.replace(".png", ".json")).write_text(json.dumps({"prompt": prompt, "label": label}, ensure_ascii=False))
-    return {"kind": kind, "name": name, "label": label}
+    image.save(folder / name)
+    (folder / name.replace(".png", ".json")).write_text(json.dumps({"prompt": prompt, "label": label.strip()}, ensure_ascii=False), encoding="utf-8")
+    return {"kind": "fake", "name": name, "label": label.strip()}
 
 
 @lru_cache(maxsize=256)
@@ -176,7 +200,10 @@ def compose(bg_id: str, placements: list[dict]) -> tuple[Image.Image, dict]:
     rows = []
     # 先頭が本物（正解の枠の並びを、用意した問題の answers.json とそろえる）
     for p in reals + [p for p in placements if p["kind"] != "real"]:
-        image, alpha, *_ = _render(bg_id, Placement(character_path(p["kind"], p["name"]), int(p["width"]), 0, bool(p["flip"]), 0, 0))
+        path = character_path(p["kind"], p["name"])
+        if not path.exists():
+            raise ValueError(f"{p['name']} という絵はない（本物は用意した絵だけ使える）")
+        image, alpha, *_ = _render(bg_id, Placement(path, int(p["width"]), 0, bool(p["flip"]), 0, 0))
         x, y = int(p["x"]), int(p["y"])
         h, w = canvas[y : y + image.shape[0], x : x + image.shape[1]].shape
         image, alpha = image[:h, :w], alpha[:h, :w]
@@ -198,9 +225,9 @@ def save_question(image: Image.Image, answer: dict, meta: dict) -> str:
     numbers = [int(p.stem[1:]) for p in USER_QUESTION_DIR.glob("u*.json")]
     question_id = f"u{max(numbers, default=0) + 1}"
     image.save(USER_QUESTION_DIR / f"{question_id}.png")
-    (USER_QUESTION_DIR / f"{question_id}.json").write_text(json.dumps({**answer, **meta}, ensure_ascii=False, indent=1))
+    (USER_QUESTION_DIR / f"{question_id}.json").write_text(json.dumps({**answer, **meta}, ensure_ascii=False, indent=1), encoding="utf-8")
     return question_id
 
 
 def saved_questions() -> dict[str, dict]:
-    return {p.stem: json.loads(p.read_text()) for p in sorted(USER_QUESTION_DIR.glob("u*.json"), key=lambda p: int(p.stem[1:]))}
+    return {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(USER_QUESTION_DIR.glob("u*.json"), key=lambda p: int(p.stem[1:]))}

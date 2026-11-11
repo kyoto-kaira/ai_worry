@@ -8,7 +8,6 @@ APP_DIR = Path(__file__).resolve().parent
 QUESTION_IMAGE_DIR = APP_DATA_DIR / "builtin"
 ANSWERS_PATH = QUESTION_IMAGE_DIR / "answers.json"
 DETECTIONS_PATH = QUESTION_IMAGE_DIR / "detections.json"
-# ヒントに使う YOLO のモデル（本物の Kaira君だけを見つけるよう学習したもの。クラスは kaira の1つ）。
 # Kaira君用に学習したもの（クラス名に real / fake / kaira を含む）でなければ、正解の位置からヒントを作るモックで動く
 MODEL_PATH = APP_DATA_DIR / "model" / "best.pt"
 KAIRA_CLASS_WORDS = ("real", "fake", "kaira")

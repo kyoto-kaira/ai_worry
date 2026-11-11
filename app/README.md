@@ -17,7 +17,7 @@ uv run python app/build.py   # 用意した問題の画像・正解の枠・YOLO
 uv run python app/server.py   # 解く http://localhost:8770/ 、作る http://localhost:8770/create
 ```
 
-- YOLO は `app/data/model/best.pt`（本物の Kaira君だけを見つけるよう学習したもの。クラスは `kaira` の1つ）を使う。
+- YOLO は `app/data/model/best.pt`（本物の Kaira君だけを見つけるよう学習した YOLO11n。クラスは `real_kaira_kun` の1つ）を使う。
   GPU は要らない（CPU で画像1枚 約0.6秒）。torch・ultralytics はプロジェクトの依存に入っている（`uv sync` で入る）。
   Linux で普通に入れると GPU 用の CUDA（約1.5GB）まで入るので、`pyproject.toml` で CPU 版の torch を使う設定にしてある
 - 背景と偽物の生成には、リポジトリ直下の `.env` に書いた `GEMINI_API_KEY` を使う（起動時に自動で読む）。なくても既存の背景とキャラで問題は作れる
@@ -27,9 +27,6 @@ uv run python app/server.py   # 解く http://localhost:8770/ 、作る http://l
 - キャラを背景の線の太さに合わせて描くので、ある背景・大きさで初めて置くキャラは表示まで1〜3秒かかる（2回目からはすぐ）
 
 `app/data/model/best.pt` がないときは、本物の枠を少しずらして YOLO の出力に見立てたモックでヒントを出す（画面右上に「ヒント: モック」と出る）。
-
-`app/data/model/best.pt` の成績（用意した25問。推論の画像サイズなどはモデルの学習時の設定のまま）：YOLO の候補は1問あたり3〜12個で、本物は24問で1位、問題18だけ7位。
-偽物はどれも確信度 0.06 未満（本物と見分けられている）。Gemini で作った京都駅の背景に置いた本物は見つけられなかった（知らない背景には弱い）。
 
 ## 作り方（作る画面）
 

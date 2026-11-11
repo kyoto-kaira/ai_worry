@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import create
 from config import (
-    ANSWERS_PATH, APP_DIR, DETECTIONS_PATH, DEFAULT_WIDTH, FOOL_TOP, HINT_CONFIDENCE, LEVELS, PLACE_GAP, PORT, QUESTION_IMAGE_DIR,
+    ANSWERS_PATH, APP_DIR, DETECTIONS_PATH, DEFAULT_WIDTH, FOOL_TOP, LEVELS, PLACE_GAP, PORT, QUESTION_IMAGE_DIR,
     THEME_EXAMPLE, USER_DETECTIONS_PATH, USER_QUESTION_DIR, WIDTH_RANGE,
 )
 from detect import Detector, load_detections, save_detections, seed_of
@@ -25,7 +25,7 @@ class Game:
     def __init__(self):
         if not ANSWERS_PATH.exists():
             raise SystemExit("用意した問題がない。先に uv run python app/build.py を実行する")
-        # 問題の番号：用意した問題は "1"〜、お客さんが作った問題は "u1"〜
+        # 問題の番号：用意した問題は "1"〜、お客様が作った問題は "u1"〜
         self.answers = {str(k): v for k, v in json.loads(ANSWERS_PATH.read_text(encoding="utf-8")).items()}
         self.answers.update(create.saved_questions())
         self.detector = Detector()
@@ -56,8 +56,8 @@ class Game:
         return {q: saved[q] for q in question_ids}
 
     def candidates(self, question_id: str) -> list[dict]:
-        """ヒントに使う YOLO の候補（本物らしさの確信度が HINT_CONFIDENCE 以上のもの、高い順）"""
-        return [d for d in self.detections[question_id] if not d["fake"] and d["conf"] >= HINT_CONFIDENCE]
+        """ヒントに使う YOLO の候補（本物らしさの確信度が高い順）"""
+        return [d for d in self.detections[question_id] if not d["fake"]]
 
     def real_rank(self, question_id: str) -> int | None:
         """YOLO の候補の中で本物が何番目か（1 始まり。候補に入っていなければ None）"""
@@ -72,7 +72,6 @@ class Game:
         return {
             "questions": [{"id": q, "title": self.title(q), "real_rank": self.real_rank(q)} for q in ordered],
             "levels": LEVELS,
-            "hint_confidence": HINT_CONFIDENCE,
             "yolo": {"mode": self.detector.mode, "reason": self.detector.reason},
         }
 
@@ -168,7 +167,7 @@ def handler(game: Game):
         def do_POST(self):
             routes = {
                 "/api/create/scene": lambda req: {"scene": create.describe_scene(req["theme"])},
-                "/api/create/background": lambda req: create.generate_background(req["theme"], req["scene"], bool(req.get("decoy"))),
+                "/api/create/background": lambda req: create.generate_background(req["theme"], req["scene"]),
                 "/api/create/fake": game.make_fake,
                 "/api/create/fake/save": game.save_fake,
                 "/api/create/sprite": game.sprite,

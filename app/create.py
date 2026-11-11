@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from config import (
-    BACKGROUND_BASE_PROMPT, DECOY_KAIRA_PROMPT, FAKE_FEATURES, GEMINI_TRIES, GENERATED_BLUR, KAIRA_BASE, KAIRA_PROMPT,
+    BACKGROUND_BASE_PROMPT, FAKE_FEATURES, GEMINI_TRIES, GENERATED_BLUR, KAIRA_BASE, KAIRA_PROMPT,
     NO_KAIRA_PROMPT, SCENE_PROMPT, TEXT_MODEL, USER_BACKGROUND_DIR, USER_FAKE_DIR, USER_QUESTION_DIR,
 )
 from gen_img.kaira_kun.transparent import on_white, to_transparent
@@ -91,24 +91,23 @@ def describe_scene(theme: str) -> str:
     return response.text.strip()
 
 
-def generate_background(theme: str, scene: str, decoy: bool) -> dict:
-    """背景作りの2段階目：場面の説明と、共通の画風・構図の指示で背景を描かせて保存する（1枚 約20秒）。
-    decoy なら Kaira君に似た生き物をわざと紛れ込ませる"""
+def generate_background(theme: str, scene: str) -> dict:
+    """背景作りの2段階目：場面の説明と、共通の画風・構図の指示で背景を描かせて保存する（1枚 約20秒）"""
     from gen_img.background.config import REFERENCE_NOTE, STYLE_REFERENCES
 
-    prompt = f"{REFERENCE_NOTE} SCENE: {scene} {BACKGROUND_BASE_PROMPT}{DECOY_KAIRA_PROMPT if decoy else NO_KAIRA_PROMPT}"
+    prompt = f"{REFERENCE_NOTE} SCENE: {scene} {BACKGROUND_BASE_PROMPT}{NO_KAIRA_PROMPT}"
     references = [Image.open(p) for p in STYLE_REFERENCES if p.exists()]
     image = gemini_image([*references, prompt]).convert("L").convert("RGB")
     bg_id = f"g{int(time.time())}"
     USER_BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
     image.save(USER_BACKGROUND_DIR / f"{bg_id}.png")
-    meta = {"theme": theme, "scene": scene, "decoy": decoy}
+    meta = {"theme": theme, "scene": scene}
     (USER_BACKGROUND_DIR / f"{bg_id}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return {"id": bg_id, "label": background_label(meta)}
 
 
 def background_label(meta: dict) -> str:
-    return f"生成: {meta['theme'][:30]}" + ("（Kaira君っぽい生き物あり）" if meta.get("decoy") else "")
+    return f"生成: {meta['theme'][:30]}"
 
 
 @lru_cache(maxsize=32)

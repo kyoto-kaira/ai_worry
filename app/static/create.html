@@ -65,7 +65,6 @@
       <div class="row" style="margin-top:6px"><button id="describe">説明を作る</button></div>
       <p class="help">② 説明を読んで、直したい所があれば書き直してください。「この説明で背景を作る」を押すと絵ができます（約20秒）。物がたくさん描き込まれた場面ほど、難しい問題になります。</p>
       <textarea id="scene" style="height:120px"></textarea>
-      <label style="display:flex; gap:6px; align-items:flex-start; margin-top:6px"><input type="checkbox" id="decoy" style="margin-top:3px"><span>Kaira君っぽい生き物を紛れ込ませる（人が迷いやすくなる）</span></label>
       <div class="row" style="margin-top:6px"><button id="generate" disabled>この説明で背景を作る</button></div>
     </details>
 
@@ -362,7 +361,7 @@ async function generateBackground() {
   $("generate").disabled = true;
   $("status").textContent = "Gemini で背景を作っています…（約20秒）";
   try {
-    const b = await post("/api/create/background", { theme, scene: $("scene").value.trim(), decoy: $("decoy").checked });
+    const b = await post("/api/create/background", { theme, scene: $("scene").value.trim() });
     options.backgrounds.push(b);
     $("background").add(new Option(b.label, b.id));
     setBackground(b.id);

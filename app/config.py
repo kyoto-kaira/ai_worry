@@ -12,29 +12,25 @@ DETECTIONS_PATH = QUESTION_IMAGE_DIR / "detections.json"
 # Kaira君用に学習したもの（クラス名に real / fake / kaira を含む）でなければ、正解の位置からヒントを作るモックで動く
 MODEL_PATH = APP_DATA_DIR / "model" / "best.pt"
 KAIRA_CLASS_WORDS = ("real", "fake", "kaira")
-# 推論の画像サイズ。問題画像（1024px）を少し拡大して推論すると、小さめの Kaira君（幅120px ほど）も見つけやすい
-# （用意した25問で、本物を確信度 0.1 以上で見つけたのは 1024 なら22問、1280 なら24問。偽物を本物と間違える量は変わらない）
-YOLO_IMAGE_SIZE = 1280
-# 検出は確信度の低いものまで取っておき（答えの画面で見せる）、ヒントには HINT_CONFIDENCE 以上のものだけ使う
+# ヒントは確信度の高い順に上位いくつかを使うので、確信度の低い候補まで取っておく
 YOLO_CONFIDENCE = 0.001
 YOLO_MAX_DETECTIONS = 50
-HINT_CONFIDENCE = 0.1
 # YOLO の検出と正解の枠がこの重なり（IoU）以上なら、同じキャラとみなす
 MATCH_IOU = 0.3
 
 PORT = 8770
 
-# 問題作成：お客さんが作った問題・Gemini で生成した背景・プロンプトで作った偽物の保存先（git には入れない）
+# 問題作成：お客様が作った問題・Gemini で生成した背景・プロンプトで作った偽物の保存先（git には入れない）
 USER_DATA_DIR = APP_DATA_DIR / "user"
 USER_QUESTION_DIR = USER_DATA_DIR / "questions"
-# お客さんが作った問題の YOLO の検出結果（登録したときに検出して保存する）
+# お客様が作った問題の YOLO の検出結果（登録したときに検出して保存する）
 USER_DETECTIONS_PATH = USER_QUESTION_DIR / "detections.json"
 USER_BACKGROUND_DIR = USER_DATA_DIR / "backgrounds"
 # プロンプトで作った偽物（本物は作れない。用意した絵だけを使う）
 USER_FAKE_DIR = USER_DATA_DIR / "fakes"
 # 生成した背景のキャラの線のぼかし量（既存の背景は gen_img.question.config.BACKGROUND_STYLES の値を使う）
 GENERATED_BLUR = 0.4
-# 背景は2段階で作る：①テーマ（お客さんが日本語で書く）から、文章のモデルで場面の詳しい説明を書かせる（画面で直せる）
+# 背景は2段階で作る：①テーマ（お客様が日本語で書く）から、文章のモデルで場面の詳しい説明を書かせる（画面で直せる）
 # ②その説明と、全背景で共通の画風・構図の指示（BACKGROUND_BASE_PROMPT）で、画像のモデルに描かせる
 THEME_EXAMPLE = "京都駅の大階段とコンコース"
 TEXT_MODEL = "gemini-2.5-flash"
@@ -56,25 +52,18 @@ BACKGROUND_BASE_PROMPT = (
     "never zero, but do NOT crowd the screen with creatures). Focus heavily on inanimate objects, architecture, "
     "machinery, furniture, and environmental details, leaving clean floor/surface spaces for character placement. "
 )
-# 背景に Kaira君に似た生き物を描かせない指示（ふつう）と、わざと紛れ込ませる指示
-# （「Kaira君っぽい生き物を紛れ込ませる」を選んだとき。人も YOLO も迷いやすくなる）
+# 背景に Kaira君に似た生き物を描かせない指示（描かれると答えが2つになる）
 NO_KAIRA_PROMPT = "Do NOT draw any brain-shaped creature, and no creature with a net or mesh of tentacles."
-DECOY_KAIRA_PROMPT = (
-    "IMPORTANT: Place 5 to 8 clearly visible decoy creatures scattered on the floor and platforms, each about as large "
-    "as a suitcase. Each decoy is a round, lumpy, brain-shaped blob seen from the side, with two big round eyes on the "
-    "front, two short arms with three small fingers, and a tail made of a loose net of crossing curved lines with small "
-    "circles at the joints. Vary them slightly (different poses, some with a hat or ribbon) so they look like relatives."
-)
 # キャラを置くときの横幅（px）の範囲と最初の値、キャラ同士・画像の端とのすき間（px）
 WIDTH_RANGE = (60, 180)
 DEFAULT_WIDTH = 110
 PLACE_GAP = 8
-# 登録したとき、YOLO の候補（確信度 HINT_CONFIDENCE 以上）の上位この数に本物が入らなければ「AIを出し抜いた」とする
+# 登録したとき、YOLO の候補（確信度の高い順）の上位この数に本物が入らなければ「AIを出し抜いた」とする
 FOOL_TOP = 5
 
 # Gemini が画像のない応答を返したとき、頼み直す回数（最初の1回を含む）
 GEMINI_TRIES = 3
-# プロンプトで偽物を作るとき：本物の絵を Gemini に渡し、{prompt}（お客さんが日本語で書いた指示）のとおりに描き変えさせる
+# プロンプトで偽物を作るとき：本物の絵を Gemini に渡し、{prompt}（お客様が日本語で書いた指示）のとおりに描き変えさせる
 KAIRA_BASE = REAL_DIR / "1.png"
 KAIRA_PROMPT = (
     "この白黒の線画のキャラクターを、次のように描き変えてください：{prompt}。"
@@ -84,7 +73,7 @@ KAIRA_PROMPT = (
     "画像の真ん中に、このキャラクター1体だけを描いてください。"
 )
 
-# 難易度：ヒントは top 個の丸。YOLO の候補（確信度 HINT_CONFIDENCE 以上、高い順）を使い、足りない分はランダムに選んだ偽物で埋める。
+# 難易度：ヒントは top 個の丸。YOLO の候補（確信度の高い順）を使い、足りない分はランダムに選んだ偽物で埋める。
 # top = 0 ならヒントなし。hint_radius = 丸の半径（キャラの枠の大きさの何倍か）。丸の中心はキャラから少しずらす
 LEVELS = {
     "easy": {"label": "かんたん（上位2）", "top": 2, "hint_radius": 1.0},

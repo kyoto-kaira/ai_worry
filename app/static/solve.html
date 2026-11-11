@@ -145,10 +145,10 @@ function tick() {
   $("hints").textContent = state.hints;
 }
 
-// ヒントにする場所：YOLO の候補（確信度が hint_confidence 以上、高い順）から top 個。
+// ヒントにする場所：YOLO の候補（確信度の高い順）から top 個。
 // YOLO の候補が足りないときは、まだ選んでいない偽物をランダムに選んで埋める（丸の数で本物がばれないように）
 function hintTargets(top) {
-  const yolo = q.detections.filter((d) => !d.fake && d.conf >= info.hint_confidence).slice(0, top);
+  const yolo = q.detections.filter((d) => !d.fake).slice(0, top);
   const used = new Set(yolo.map((d) => d.match));
   const fakes = q.characters
     .map((c, i) => ({ ...c, i }))
@@ -245,7 +245,7 @@ function draw() {
     // YOLO の推定の上位（青い点線と確信度。一番多くヒントに出す数まで）
     ctx.strokeStyle = "#3182ce"; ctx.fillStyle = "#3182ce"; ctx.lineWidth = lw; ctx.setLineDash([4 / view.scale, 4 / view.scale]);
     const maxTop = Math.max(...Object.values(info.levels).map((lv) => lv.top));
-    for (const d of q.detections.filter((d) => !d.fake && d.conf >= info.hint_confidence).slice(0, maxTop)) {
+    for (const d of q.detections.filter((d) => !d.fake).slice(0, maxTop)) {
       const [x0, y0, x1, y1] = d.box;
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       ctx.fillText(percent(d.conf), x0, y1 + 14 / view.scale);

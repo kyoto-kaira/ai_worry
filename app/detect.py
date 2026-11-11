@@ -2,7 +2,7 @@ import json
 import random
 import zlib
 
-from config import KAIRA_CLASS_WORDS, MATCH_IOU, MODEL_PATH, YOLO_CONFIDENCE, YOLO_IMAGE_SIZE, YOLO_MAX_DETECTIONS
+from config import KAIRA_CLASS_WORDS, MATCH_IOU, MODEL_PATH, YOLO_CONFIDENCE, YOLO_MAX_DETECTIONS
 
 
 def iou(a, b) -> float:
@@ -41,14 +41,14 @@ class Detector:
         if not self.model:
             return "mock"
         stat = MODEL_PATH.stat()
-        return f"{MODEL_PATH.name}|{stat.st_size}|{stat.st_mtime_ns}|{YOLO_IMAGE_SIZE}|{YOLO_CONFIDENCE}|{YOLO_MAX_DETECTIONS}"
+        return f"{MODEL_PATH.name}|{stat.st_size}|{stat.st_mtime_ns}|{YOLO_CONFIDENCE}|{YOLO_MAX_DETECTIONS}"
 
     def detect(self, image_path, answer: dict, seed: int) -> list[dict]:
         """候補の枠と確信度（高い順）。正解のキャラと重なる候補には、そのキャラの番号（match。0 = 本物）を付ける。
         fake は「偽物」クラスの候補（偽物も見分けるモデルの場合）"""
         if self.model:
             result = self.model.predict(
-                str(image_path), imgsz=YOLO_IMAGE_SIZE, conf=YOLO_CONFIDENCE, max_det=YOLO_MAX_DETECTIONS, verbose=False
+                str(image_path), conf=YOLO_CONFIDENCE, max_det=YOLO_MAX_DETECTIONS, verbose=False
             )[0]
             boxes = [
                 {
